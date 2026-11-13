@@ -71,6 +71,9 @@ Inspiration : les loopers tactiles à canevas (type Loopy Pro), pour leurs princ
 - La disposition est une donnée JSON stockée dans le projet, pas du code. L'interface web de la tête pourra la relire.
 - Pensée pour le tactile et la scène : grandes cibles, états lisibles de loin (couleur plus texte ou icône).
 
+### D10. Nombre de boucles : libre, 6 par défaut, plafond réglable
+Le moteur gère N boucles. Un projet neuf en propose 6. Un plafond logiciel (`maxLoops`) fixé par la cible limite N : la version lite de la tête pourra le bloquer à 4 selon la charge mesurée. Aucune structure ne suppose un nombre fixe, pour pouvoir faire évoluer ces valeurs.
+
 ## Modèle de données (cible)
 
 - **Project** : version du format, fréquence d'échantillonnage, tempo et signature (constants en V1, structure prête pour une tempo map), grille, pistes, sections (une section implicite en V1), mappings MIDI, réglages.
@@ -117,7 +120,7 @@ Principe : avoir un looper jouable à la guitare dès J2, puis au pied dès J3, 
 | J1 | Horloge musicale, conversions temps ↔ échantillons | Aucune dérive sur 1 h simulée à 44,1, 48 et 96 kHz |
 | J2 | Une piste jouable : rec, play, overdub, undo, tampon circulaire, ordonnanceur et tolérance, fondus, **dans un Standalone JUCE minimal** (périphériques, décalage de latence réglable à la main) | Banc hors ligne à clics synthétiques sans discontinuité ; essai à la guitare |
 | J3 | MIDI de base : learn, gestes (court, long, double), mappings | Test V1-3, rejeu de MIDI horodaté ; essai au pédalier |
-| J4 | 6 pistes, longueurs différentes, mixeur, niveaux, pool mémoire | Test V1-1, budget RAM respecté |
+| J4 | N boucles (6 par défaut, plafond réglable), longueurs différentes, mixeur, niveaux, pool mémoire | Test V1-1, budget RAM respecté, plafond respecté |
 | J5 | Sessions : sauvegarde, chargement, récupération, erreurs | Tests V1-2 et V1-7 |
 | J5b | Éditeur de canevas (D9) : pages, widgets, liaison aux actions, disposition sauvegardée | Disposition rechargée à l'identique ; chaque widget déclenche la même commande que son équivalent MIDI |
 | J6 | Plugins VST3 et AU, transport hôte | pluginval, auval, test V1-5 |
