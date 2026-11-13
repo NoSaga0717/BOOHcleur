@@ -4,7 +4,7 @@ Looper guitare multipiste avec **Smart Quantize** : il corrige le placement des 
 
 ## Où on en est
 
-Squelette du dépôt seulement : pas encore de code audio. L'architecture est figée dans [`docs/adr/0001-architecture.md`](docs/adr/0001-architecture.md). Prochain jalon : J1, horloge musicale et conversions temps musical ↔ échantillons.
+J1 fait : horloge musicale, conversions temps musical ↔ échantillons, grille des frontières et règle de déclenchement (`core/`). Pas encore de traitement audio. L'architecture est dans [`docs/adr/0001-architecture.md`](docs/adr/0001-architecture.md). Prochain jalon : J2, une piste jouable dans un Standalone minimal.
 
 | Document | Contenu |
 | --- | --- |
