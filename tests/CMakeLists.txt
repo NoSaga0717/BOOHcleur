@@ -9,6 +9,10 @@ FetchContent_MakeAvailable(Catch2)
 
 add_executable(boohcleur-tests
 	VersionTests.cpp
+	MusicalTimeTests.cpp
+	TempoMapTests.cpp
+	GridTests.cpp
+	TransportClockTests.cpp
 )
 target_link_libraries(boohcleur-tests PRIVATE boohcleur::core Catch2::Catch2WithMain)
 

@@ -1,5 +1,9 @@
 add_library(boohcleur-core
 	src/Version.cpp
+	src/MusicalTime.cpp
+	src/TempoMap.cpp
+	src/Grid.cpp
+	src/TransportClock.cpp
 )
 add_library(boohcleur::core ALIAS boohcleur-core)
 
