@@ -20,7 +20,7 @@ jobs:
           - name: Windows x64
             os: windows-2022
           - name: macOS
-            os: macos-14
+            os: macos-15
     steps:
       - uses: actions/checkout@v4
       - name: Configure
