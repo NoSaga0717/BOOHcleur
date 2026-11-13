@@ -26,6 +26,9 @@ Le produit principal est un looper complet en Standalone et en plugin. Le portag
 ### D1. Licence : GPLv3
 Le projet est publié sous GPLv3, ce qui le rend compatible avec stompbox. Conséquences : JUCE est utilisable sous AGPLv3, et des bibliothèques GPL (aubio, Rubber Band) restent possibles si elles apportent un gain mesuré.
 
+### D1b. Langage : C++20 avec JUCE
+Rust a été envisagé (sécurité mémoire, Cargo, compilation croisée simple). C++ est retenu parce que l'AU et une interface riche sont mûrs dans JUCE, alors que nih-plug ne fait pas d'AU. L'écosystème voisin (Stompbox, NAM, Signalsmith Stretch) est aussi en C++.
+
 ### D2. Moteur commun sans JUCE
 C'est ce qui rend le portage possible plus tard : la tête n'a pas JUCE. La version lite réutilisera le même moteur avec moins de fonctions activées (moins de pistes, mono, sans Smart Quantize si le CPU ne suit pas), plutôt qu'un code à part.
 `boohcleur-core` ne dépend que du C++20 et de la bibliothèque standard. JUCE ne sert qu'aux enveloppes Standalone, VST3, AU et à l'interface de bureau. Le même moteur pourra être appelé par un adaptateur stompbox ou un client JACK.
