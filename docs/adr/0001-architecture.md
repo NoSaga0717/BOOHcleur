@@ -6,7 +6,7 @@
 
 ## Contexte
 
-Le cahier des charges vise un Standalone et un VST3 bâtis sur JUCE. Le projet doit aussi pouvoir s'intégrer à la Tête NAM, dont le moteur a d'autres contraintes :
+Le cahier des charges vise un Standalone et un VST3 bâtis sur JUCE. Formats retenus : Standalone, VST3 et AU (Logic, macOS). Le projet doit aussi pouvoir s'intégrer à la Tête NAM, dont le moteur a d'autres contraintes :
 
 | Contrainte de la tête | Source |
 | --- | --- |
@@ -28,7 +28,7 @@ Le projet est publié sous GPLv3, ce qui le rend compatible avec stompbox. Cons�
 
 ### D2. Moteur commun sans JUCE
 C'est ce qui rend le portage possible plus tard : la tête n'a pas JUCE. La version lite réutilisera le même moteur avec moins de fonctions activées (moins de pistes, mono, sans Smart Quantize si le CPU ne suit pas), plutôt qu'un code à part.
-`boohcleur-core` ne dépend que du C++20 et de la bibliothèque standard. JUCE ne sert qu'aux enveloppes Standalone, VST3 et à l'interface de bureau. Le même moteur pourra être appelé par un adaptateur stompbox ou un client JACK.
+`boohcleur-core` ne dépend que du C++20 et de la bibliothèque standard. JUCE ne sert qu'aux enveloppes Standalone, VST3, AU et à l'interface de bureau. Le même moteur pourra être appelé par un adaptateur stompbox ou un client JACK.
 
 ### D3. Modules
 
@@ -39,7 +39,7 @@ C'est ce qui rend le portage possible plus tard : la tête n'a pas JUCE. La vers
 | `render` | analysis, Signalsmith Stretch (MIT) | Rendu corrigé d'une couche à partir de la source et de la warp map. | V2 |
 | `control` | core | MIDI Learn, gestes (appui court, long, double), actions, protocole de commandes et d'état commun aux interfaces. | J5 |
 | `session` | core, dr_libs, JSON | Manifeste versionné, WAV float32, écriture atomique, migration, récupération après crash. | J6 |
-| `juce` | tous + JUCE | AudioProcessor, Standalone, VST3, interface de bureau. | J4, J7 |
+| `juce` | tous + JUCE | AudioProcessor, Standalone, VST3, AU, interface de bureau. | J2, J6 |
 | `stompbox` | core, control | Adaptateur pour la tête (version lite). | Après V1 |
 
 ### D4. Threads
@@ -96,23 +96,24 @@ Toute autre combinaison est rejetée avec un événement « commande refusée »
 
 **Geste MIDI** : Idle, Pressed, puis appui court, double ou long selon les seuils. L'horodatage transmis est celui du premier appui.
 
-**Transport** : Internal (Standalone) ou HostFollowing (VST3), avec une politique documentée pour play, stop, seek, bouclage, changement de BPM ou de signature.
+**Transport** : Internal (Standalone) ou HostFollowing (VST3, AU), avec une politique documentée pour play, stop, seek, bouclage, changement de BPM ou de signature.
 
 **Sauvegarde** : Idle, Snapshot, Writing (fichiers temporaires), Commit (renommage atomique), Idle ou Error.
 
 ## Jalons
 
+Principe : avoir un looper jouable à la guitare dès J2, puis au pied dès J3, pour juger le comportement réel le plus tôt possible. Les fonctions s'ajoutent ensuite autour.
+
 | Jalon | Contenu | Validation |
 | --- | --- | --- |
 | J0 | Dépôt, CMake, CI, ADR | Compilation et tests verts sur la CI |
 | J1 | Horloge musicale, conversions temps ↔ échantillons | Aucune dérive sur 1 h simulée à 44,1, 48 et 96 kHz |
-| J2 | Une piste : rec, play, overdub, undo, tampon circulaire, ordonnanceur et tolérance, fondus | Banc hors ligne à clics synthétiques, détection de discontinuités |
-| J3 | 6 pistes, longueurs différentes, mixeur, niveaux, pool mémoire | Test V1-1 hors ligne, budget RAM respecté |
-| J4 | Standalone JUCE, périphériques, latence | Calibration en boucle physique reproductible |
-| J5 | MIDI : learn, gestes, mappings | Test V1-3, rejeu de MIDI horodaté |
-| J6 | Sessions : sauvegarde, chargement, récupération, erreurs | Tests V1-2 et V1-7 |
-| J7 | VST3, transport hôte | pluginval, test V1-5 |
-| J8 | Campagne V1 sur la machine de référence | Test V1-6, mesures publiées |
+| J2 | Une piste jouable : rec, play, overdub, undo, tampon circulaire, ordonnanceur et tolérance, fondus, **dans un Standalone JUCE minimal** (périphériques, décalage de latence réglable à la main) | Banc hors ligne à clics synthétiques sans discontinuité ; essai à la guitare |
+| J3 | MIDI de base : learn, gestes (court, long, double), mappings | Test V1-3, rejeu de MIDI horodaté ; essai au pédalier |
+| J4 | 6 pistes, longueurs différentes, mixeur, niveaux, pool mémoire | Test V1-1, budget RAM respecté |
+| J5 | Sessions : sauvegarde, chargement, récupération, erreurs | Tests V1-2 et V1-7 |
+| J6 | Plugins VST3 et AU, transport hôte | pluginval, auval, test V1-5 |
+| J7 | Calibration de latence en boucle physique, campagne V1 sur la machine de référence | Test V1-6, mesures publiées |
 | Q1 à Q5 | V2 : détecteur, mapper, rendu, intégration asynchrone, édition des marqueurs | Tests V2-1 à V2-6 |
 | T1 | Portage lite sur la tête : prototype Pi 5, choix D8, périmètre de la version lite | Compile sur le Pi, aucun xrun avec 2 NAM actifs ; décision D8 |
 
@@ -127,7 +128,7 @@ Toute autre combinaison est rejetée avec un événement « commande refusée »
 7. Max Shift : borner ou ignorer l'attaque hors fenêtre (ignorer).
 8. Convention de swing.
 9. Écrêtage de la somme : limiteur doux ou marge fixe.
-10. État VST3 : dossier projet référencé (chemin relatif quand c'est possible).
+10. État du plugin (VST3, AU) : dossier projet référencé (chemin relatif quand c'est possible).
 11. Format de projet : dossier JSON + WAV float32.
 12. Machine de référence et première interface audio.
 13. Chemin du MIDI dans la tête : `web.py` ou JACK (JACK, pour l'horodatage).
@@ -136,7 +137,7 @@ Toute autre combinaison est rejetée avec un événement « commande refusée »
 
 | Bibliothèque | Licence | Usage |
 | --- | --- | --- |
-| JUCE 8 | AGPLv3 ou commercial | Enveloppes et interface de bureau |
+| JUCE 8 | AGPLv3 ou commercial | Enveloppes (Standalone, VST3, AU) et interface de bureau |
 | VST3 SDK 3.8 | MIT | Format VST3 (via JUCE) |
 | Signalsmith Stretch | MIT | Rendu Smart Quantize |
 | dr_libs | domaine public ou MIT-0 | Lecture et écriture WAV |
