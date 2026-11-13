@@ -21,3 +21,4 @@ Le projet est en GPLv3. Toute bibliothèque ajoutée doit être compatible GPLv3
 - Livrer par jalons compilables et testés. Chaque jalon donne : code, commandes de build, tests, décisions, problèmes connus.
 - Passer par une branche et une pull request, jamais de push direct sur `main`.
 - Pas d'affirmation non mesurée (« zéro latence », « sans artefact »).
+- Noms de tests Catch2 en ASCII (sans accents) : sinon ctest ne les retrouve pas sous Windows.
