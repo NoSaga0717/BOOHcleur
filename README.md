@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/images/logo.png" alt="BOOHcleur" width="420"></p>
+
 # BOOHcleur
 
 Looper guitare multipiste avec **Smart Quantize** : il corrige le placement des attaques à l'intérieur d'une prise audio, sans jamais modifier l'enregistrement original. Il est prévu en application autonome (Standalone) et en plugins VST3 et AU, entièrement pilotable au MIDI, et à porter ensuite, éventuellement en version allégée, sur la [Tête NAM](https://github.com/NoSaga0717/tete-nam) (moteur [stompbox](https://github.com/NoSaga0717/stompbox) sur Raspberry Pi 5).
