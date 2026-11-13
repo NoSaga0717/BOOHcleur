@@ -1,0 +1,12 @@
+add_library(boohcleur-core
+	src/Version.cpp
+)
+add_library(boohcleur::core ALIAS boohcleur-core)
+
+target_include_directories(boohcleur-core PUBLIC
+	$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+)
+
+target_compile_definitions(boohcleur-core PRIVATE
+	BOOHCLEUR_VERSION_STRING="${PROJECT_VERSION}"
+)
