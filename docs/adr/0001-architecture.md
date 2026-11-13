@@ -20,10 +20,14 @@ Le cahier des charges vise un Standalone et un VST3 bâtis sur JUCE. Le projet d
 
 ## Décisions
 
+### D0. Priorité : le looper complet d'abord, la tête ensuite
+Le produit principal est un looper complet en Standalone et en plugin. Le portage sur la Tête NAM vient après, éventuellement en version allégée (« lite »). Les choix ci-dessous servent d'abord le Standalone et le plugin ; ils gardent seulement le portage possible, sans le développer.
+
 ### D1. Licence : GPLv3
 Le projet est publié sous GPLv3, ce qui le rend compatible avec stompbox. Conséquences : JUCE est utilisable sous AGPLv3, et des bibliothèques GPL (aubio, Rubber Band) restent possibles si elles apportent un gain mesuré.
 
 ### D2. Moteur commun sans JUCE
+C'est ce qui rend le portage possible plus tard : la tête n'a pas JUCE. La version lite réutilisera le même moteur avec moins de fonctions activées (moins de pistes, mono, sans Smart Quantize si le CPU ne suit pas), plutôt qu'un code à part.
 `boohcleur-core` ne dépend que du C++20 et de la bibliothèque standard. JUCE ne sert qu'aux enveloppes Standalone, VST3 et à l'interface de bureau. Le même moteur pourra être appelé par un adaptateur stompbox ou un client JACK.
 
 ### D3. Modules
@@ -36,7 +40,7 @@ Le projet est publié sous GPLv3, ce qui le rend compatible avec stompbox. Cons�
 | `control` | core | MIDI Learn, gestes (appui court, long, double), actions, protocole de commandes et d'état commun aux interfaces. | J5 |
 | `session` | core, dr_libs, JSON | Manifeste versionné, WAV float32, écriture atomique, migration, récupération après crash. | J6 |
 | `juce` | tous + JUCE | AudioProcessor, Standalone, VST3, interface de bureau. | J4, J7 |
-| `stompbox` | core, control | Adaptateur pour la tête. | J3b |
+| `stompbox` | core, control | Adaptateur pour la tête (version lite). | Après V1 |
 
 ### D4. Threads
 - **Audio (temps réel)** : `process()` seulement. Aucune allocation, aucun verrou bloquant, aucun accès disque. Tampons pris dans un pool pré-alloué selon un budget mémoire.
@@ -57,8 +61,8 @@ Le temps musical (mesures, temps, ticks) est la référence. La phase de chaque 
 ### D7. Mode libre de la première boucle : désactivé en V1
 En V1, la première boucle a une longueur définie par le tempo et le nombre de mesures. Le mode libre reviendra avec l'auto-tempo (V4) ou par un nouvel ADR.
 
-### D8. Mode d'intégration à la tête : décidé au jalon J3b
-Deux options : effet compilé dans stompbox-jack, ou processus JACK séparé. Le choix se fera sur prototype Pi 5. D2 garde les deux possibles.
+### D8. Mode d'intégration à la tête : décidé au moment du portage
+Deux options : effet compilé dans stompbox-jack, ou processus JACK séparé. Le choix se fera au portage, sur prototype Pi 5. D2 garde les deux possibles. D'ici là, la CI compile et teste le moteur en Linux aarch64 à chaque PR, ce qui détecte tôt une incompatibilité.
 
 ## Modèle de données (cible)
 
@@ -104,13 +108,13 @@ Toute autre combinaison est rejetée avec un événement « commande refusée »
 | J1 | Horloge musicale, conversions temps ↔ échantillons | Aucune dérive sur 1 h simulée à 44,1, 48 et 96 kHz |
 | J2 | Une piste : rec, play, overdub, undo, tampon circulaire, ordonnanceur et tolérance, fondus | Banc hors ligne à clics synthétiques, détection de discontinuités |
 | J3 | 6 pistes, longueurs différentes, mixeur, niveaux, pool mémoire | Test V1-1 hors ligne, budget RAM respecté |
-| J3b | Prototype Pi 5 dans stompbox-jack (mono) | Compile en aarch64, aucun xrun sur un scénario simple ; décision D8 |
 | J4 | Standalone JUCE, périphériques, latence | Calibration en boucle physique reproductible |
 | J5 | MIDI : learn, gestes, mappings | Test V1-3, rejeu de MIDI horodaté |
 | J6 | Sessions : sauvegarde, chargement, récupération, erreurs | Tests V1-2 et V1-7 |
 | J7 | VST3, transport hôte | pluginval, test V1-5 |
 | J8 | Campagne V1 sur la machine de référence | Test V1-6, mesures publiées |
 | Q1 à Q5 | V2 : détecteur, mapper, rendu, intégration asynchrone, édition des marqueurs | Tests V2-1 à V2-6 |
+| T1 | Portage lite sur la tête : prototype Pi 5, choix D8, périmètre de la version lite | Compile sur le Pi, aucun xrun avec 2 NAM actifs ; décision D8 |
 
 ## Arbitrages encore ouverts (valeur proposée entre parenthèses)
 
