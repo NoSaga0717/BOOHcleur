@@ -47,6 +47,12 @@ namespace boohcleur::ui
 		return {};
 	}
 
+	void LoopRing::mouseUp(const juce::MouseEvent& event)
+	{
+		if (onTap && getLocalBounds().contains(event.getPosition()) && !event.mouseWasDraggedSinceMouseDown())
+			onTap();
+	}
+
 	void LoopRing::setModel(const Model& model)
 	{
 		model_ = model;
@@ -113,7 +119,9 @@ namespace boohcleur::ui
 		}
 
 		// Commande en attente : anneau extérieur pointillé qui clignote
-		if (track.pending != PendingAction::None && model_.blink)
+		const bool pending = track.pending != PendingAction::None && !track.pendingAutomatic;
+
+		if (pending && model_.blink)
 		{
 			juce::Path outer;
 			const float r = radius + thickness * 0.95f;
@@ -130,29 +138,29 @@ namespace boohcleur::ui
 		auto text = getLocalBounds().toFloat().withSizeKeepingCentre(radius * 1.5f, radius * 1.1f);
 
 		g.setColour(track.state == TrackState::Empty ? colours::textDim : stateColour);
-		g.setFont(juce::Font(juce::FontOptions(size * 0.13f, juce::Font::bold)));
+		g.setFont(juce::Font(juce::FontOptions(juce::jmax(14.0f, size * 0.13f), juce::Font::bold)));
 		g.drawFittedText(stateLabel(track.state), text.removeFromTop(text.getHeight() * 0.45f).toNearestInt(),
 			juce::Justification::centredBottom, 1);
 
 		juce::String detail;
 		const auto pendingBar = juce::String(floorDiv(track.pendingTarget, transport.signature.ticksPerBar()) + 1);
 
-		if (track.pending == PendingAction::StartRecording)
+		if (pending && track.pending == PendingAction::StartRecording)
 			detail = fr("départ mesure ") + pendingBar;
-		else if (track.pending == PendingAction::CloseRecording || track.pending == PendingAction::CloseAndStop)
+		else if (pending && (track.pending == PendingAction::CloseRecording || track.pending == PendingAction::CloseAndStop))
 			detail = fr("fin mesure ") + pendingBar;
-		else if (track.pending == PendingAction::Play)
+		else if (pending && track.pending == PendingAction::Play)
 			detail = fr("lecture mesure ") + pendingBar;
 		else if (track.state == TrackState::Recording)
 			detail = juce::String(static_cast<double>(track.recorded) / samplesPerBar, 1) + " mesures";
 		else if (track.loopLength > 0)
-			detail = juce::String(bars) + (bars > 1 ? " mesures" : " mesure") + fr("  ·  couches ")
-				+ juce::String(track.numActiveLayers) + "/" + juce::String(track.numLayers);
+			detail = juce::String(bars) + (bars > 1 ? " mesures" : " mesure") + (model_.compact ? "\n" : fr("  ·  "))
+				+ "couches " + juce::String(track.numActiveLayers) + "/" + juce::String(track.numLayers);
 		else
-			detail = "appuie sur REC";
+			detail = model_.compact ? juce::String() : juce::String("appuie sur REC");
 
 		g.setColour(colours::textDim);
-		g.setFont(juce::Font(juce::FontOptions(size * 0.055f)));
+		g.setFont(juce::Font(juce::FontOptions(juce::jmax(11.0f, size * 0.055f))));
 		g.drawFittedText(detail, text.removeFromTop(text.getHeight() * 0.45f).toNearestInt(),
 			juce::Justification::centredTop, 2);
 	}

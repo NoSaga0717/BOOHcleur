@@ -6,7 +6,7 @@ Looper guitare multipiste avec **Smart Quantize** : il corrige le placement des 
 
 ## Où on en est
 
-J3 : une boucle jouable dans une application Standalone (Mac et Windows), à la main ou au pied : enregistrement quantifié à la mesure, lecture, overdubs en couches, undo/redo, métronome, latence réglable à la main, pédalier MIDI (apprentissage, appui court, long et double). L'architecture est dans [`docs/adr/0001-architecture.md`](docs/adr/0001-architecture.md). Prochain jalon : J4, plusieurs boucles et mixeur.
+J4 : six boucles jouables dans une application Standalone (Mac et Windows), à la main ou au pied : enregistrement quantifié à la mesure, longueurs libres par boucle, overdubs en couches, undo/redo, mixeur (volume et mute par boucle, volume général), métronome, latence réglable à la main, pédalier MIDI (apprentissage, appui court, long et double, boucle sélectionnée ou dédiée). L'architecture est dans [`docs/adr/0001-architecture.md`](docs/adr/0001-architecture.md). Prochain jalon : J5, sauvegarde et chargement des sessions.
 
 | Document | Contenu |
 | --- | --- |
@@ -14,7 +14,7 @@ J3 : une boucle jouable dans une application Standalone (Mac et Windows), à la 
 | [`docs/adr/`](docs/adr/README.md) | Décisions d'architecture (ADR), une par fichier |
 | [`AGENTS.md`](AGENTS.md) | Règles pour les IA qui travaillent sur le dépôt |
 
-<p align="center"><img src="docs/images/interface-j2.png" alt="Interface" width="640"></p>
+<p align="center"><img src="docs/images/interface-j4.png" alt="Interface" width="720"></p>
 
 ## Essayer l'application (Mac)
 
@@ -27,11 +27,11 @@ J3 : une boucle jouable dans une application Standalone (Mac et Windows), à la 
 3. Accepter l'accès au micro (c'est l'entrée de la carte son). Dans **Options > Audio/MIDI Settings**, choisir la carte son et la taille de buffer. Dans l'app, **Entrée enregistrée** : « Mono · entrée 1 » (défaut) pour une guitare branchée sur l'entrée 1, jouée des deux côtés ; « Stéréo » pour un multi-effet stéréo.
 4. Si un bandeau indique que l'entrée est coupée pour éviter le larsen, cliquer dessus pour la réactiver.
 
-Utilisation : **espace** (ou le gros bouton) enregistre, ferme la prise, lance un overdub, le ferme. **S** arrête, **Z / Y** annulent ou rétablissent une couche, **C** efface. Les départs et fins de prise tombent sur la mesure ; un appui jusqu'à 80 ms après la barre de mesure est recadré dessus (réglable). La latence se règle à la main pour l'instant (environ : taille de buffer × 2 ÷ fréquence, plus quelques ms) ; la calibration automatique arrive en J7.
+Utilisation : un clic sur l'anneau d'une boucle fait son bouton principal (enregistre, ferme la prise, lance un overdub, le ferme) et la sélectionne. Les boutons de droite et le clavier agissent sur la boucle sélectionnée (cadre jaune ; **1 à 6** ou **← →** pour choisir) : **espace** = bouton principal, **S** arrête, **Z / Y** annulent ou rétablissent une couche, **C** efface. Chaque boucle a sa propre longueur (en mesures entières) ; sous l'anneau, son volume (double-clic : 100 %) et **M** pour la couper. **Boucles** règle combien sont affichées (1 à 6). La mémoire est partagée entre toutes les boucles : 512 Mo, soit environ 23 minutes de son au total ; la jauge à droite indique ce qu'il reste. Les départs et fins de prise tombent sur la mesure ; un appui jusqu'à 80 ms après la barre de mesure est recadré dessus (réglable). La latence se règle à la main pour l'instant (environ : taille de buffer × 2 ÷ fréquence, plus quelques ms) ; la calibration automatique arrive en J7.
 
 ### Pédalier MIDI
 
-Bouton **MIDI** en haut : une ligne par action (principal, stop, play, undo, redo, effacer, transport, métronome), une colonne par geste (appui court, appui long, double appui). Cliquer une case puis appuyer sur la pédale : c'est appris. N'importe quel pédalier convient (Note, CC ou Program Change, sur n'importe quel canal) ; l'app active d'elle-même les entrées MIDI branchées.
+Bouton **MIDI** en haut : une ligne par action (principal, stop, play, undo, redo, effacer, transport, métronome, boucle suivante ou précédente), une colonne par geste (appui court, appui long, double appui). En haut du panneau, **Pédales de** choisit qui les actions de boucle visent : la boucle sélectionnée (pédalier réduit : une pédale « boucle suivante » et les autres suivent) ou une boucle précise (une pédale par boucle, qui la sélectionne aussi). Cliquer une case puis appuyer sur la pédale : c'est appris. N'importe quel pédalier convient (Note, CC ou Program Change, sur n'importe quel canal) ; l'app active d'elle-même les entrées MIDI branchées.
 
 - Une pédale peut porter trois actions : court, long (tenue 500 ms) et double (deux appuis en 300 ms). Durées réglables en bas du panneau. Une pédale sans geste long ni double réagit dès l'appui ; sinon il faut attendre de savoir quel geste c'est, mais la quantification part toujours de l'instant où le pied a appuyé.
 - Pédale « à bascule » (qui envoie 127 puis 0 à chaque appui au lieu de 127 à l'appui et 0 au relâchement) : clic sur la case, « Pédale à bascule ». Les Program Change le sont d'office.
@@ -61,7 +61,7 @@ cmake --build build -j
 
 Sur Mac, ajouter `-DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"` pour un binaire universel. Sous Linux, JUCE demande `libasound2-dev libfreetype-dev libfontconfig1-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxext-dev`.
 
-Capture de l'interface sans carte son (développement) : option `-DBOOHCLEUR_BUILD_SCREENSHOT=ON`, puis `boohcleur-screenshot sortie.png overdub` (scénarios : `overdub`, `armed`, `recording`, `empty`, `midi`).
+Capture de l'interface sans carte son (développement) : option `-DBOOHCLEUR_BUILD_SCREENSHOT=ON`, puis `boohcleur-screenshot sortie.png overdub` (scénarios : `loops`, `overdub`, `armed`, `recording`, `empty`, `midi`).
 
 ## Organisation
 

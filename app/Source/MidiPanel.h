@@ -16,7 +16,7 @@ namespace boohcleur::ui
 	class MidiPanel final : public juce::Component
 	{
 	public:
-		explicit MidiPanel(MidiControl& control);
+		MidiPanel(MidiControl& control, int numTracks);
 
 		std::function<void()> onClose;
 		std::function<void()> onOpenDeviceSettings;	// Standalone seulement
@@ -40,6 +40,8 @@ namespace boohcleur::ui
 		void cellClicked(int action, int gesture);
 		void send(const ControlRequest& request);
 		ControlRequest learnRequest(int action, int gesture) const;
+		std::uint8_t targetTrack() const;
+		static bool isLoopAction(ControlAction action);
 
 		MidiControl& control_;
 		ControlState state_ {};
@@ -48,7 +50,8 @@ namespace boohcleur::ui
 		std::array<juce::Label, numGestures> gestureLabels_;
 		std::array<std::array<Cell, numGestures>, numActions> cells_;
 
-		juce::Label title_, lastMessage_, help_, longCaption_, doubleCaption_;
+		juce::Label title_, lastMessage_, help_, longCaption_, doubleCaption_, targetCaption_;
+		juce::ComboBox targetBox_;
 		juce::Slider longSlider_, doubleSlider_;
 		juce::TextButton closeButton_ { "Fermer" }, devicesButton_, clearAllButton_;
 	};

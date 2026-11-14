@@ -18,18 +18,20 @@ namespace boohcleur
 		}
 	}
 
-	void LoopTrack::prepare(const TrackConfig& config)
+	void LoopTrack::prepare(const TrackConfig& config, SamplePool& pool)
 	{
 		config_ = config;
 		config_.fadeSamples = std::max(config_.fadeSamples, 1);
+		pool_ = &pool;
 
 		// +2 : un tour peut durer un échantillon de plus que le premier (J1).
-		const auto capacity = static_cast<std::size_t>(config_.maxLoopSamples + 2);
+		const SamplePos capacity = config_.maxLoopSamples + 2;
+		const auto numChunks = static_cast<std::size_t>((capacity + pool.chunkFrames() - 1) / pool.chunkFrames());
 
 		layers_.assign(static_cast<std::size_t>(config_.maxLayers), Layer {});
 
 		for (auto& layer : layers_)
-			layer.data.assign(static_cast<std::size_t>(config_.numChannels), std::vector<float>(capacity, 0.0f));
+			layer.chunks.assign(numChunks, -1);
 
 		preRoll_.assign(static_cast<std::size_t>(config_.numChannels),
 			std::vector<float>(static_cast<std::size_t>(config_.fadeSamples), 0.0f));
@@ -54,6 +56,49 @@ namespace boohcleur
 		return nullptr;
 	}
 
+	void LoopTrack::releaseLayer(Layer& layer) noexcept
+	{
+		for (auto& chunk : layer.chunks)
+		{
+			if (chunk >= 0 && pool_ != nullptr)
+				pool_->release(chunk);
+
+			chunk = -1;
+		}
+
+		layer.count = 0;
+	}
+
+	bool LoopTrack::ensure(Layer& layer, SamplePos index) noexcept
+	{
+		const auto slot = static_cast<std::size_t>(index / pool_->chunkFrames());
+
+		if (slot >= layer.chunks.size())
+			return false;
+
+		if (layer.chunks[slot] < 0)
+			layer.chunks[slot] = pool_->acquire();
+
+		return layer.chunks[slot] >= 0;
+	}
+
+	float LoopTrack::read(const Layer& layer, int c, SamplePos index) const noexcept
+	{
+		const int frames = pool_->chunkFrames();
+		const auto slot = static_cast<std::size_t>(index / frames);
+
+		if (slot >= layer.chunks.size() || layer.chunks[slot] < 0)
+			return 0.0f;
+
+		return pool_->channel(layer.chunks[slot], c)[index % frames];
+	}
+
+	float& LoopTrack::sample(Layer& layer, int c, SamplePos index) noexcept
+	{
+		const int frames = pool_->chunkFrames();
+		return pool_->channel(layer.chunks[static_cast<std::size_t>(index / frames)], c)[index % frames];
+	}
+
 	void LoopTrack::resetContent() noexcept
 	{
 		for (auto& capture : captures_)
@@ -61,6 +106,7 @@ namespace boohcleur
 
 		for (auto& layer : layers_)
 		{
+			releaseLayer(layer);
 			layer.count = 0;
 			layer.startOffset = 0;
 			layer.gain = 0.0f;
@@ -189,10 +235,15 @@ namespace boohcleur
 		if (capture == nullptr)
 			return false;
 
+		// Les couches annulées sont abandonnées : leur mémoire retourne à la réserve.
+		for (int l = numActive_; l < numLayers_; ++l)
+			releaseLayer(layers_[static_cast<std::size_t>(l)]);
+
 		numLayers_ = numActive_;
 
 		const int index = numLayers_;
 		auto& layer = layers_[static_cast<std::size_t>(index)];
+		releaseLayer(layer);
 		layer.startOffset = locateInLoop(tempoMap, span_, at).offset;
 		layer.count = 0;
 		layer.gain = 1.0f;
@@ -326,7 +377,7 @@ namespace boohcleur
 				const float gain = layer.gain * trackGain_;
 
 				for (int c = 0; c < config_.numChannels; ++c)
-					out[c][i] += layer.data[static_cast<std::size_t>(c)][static_cast<std::size_t>(rel)] * gain;
+					out[c][i] += read(layer, c, rel) * gain;
 			}
 
 			++position.offset;
@@ -365,9 +416,9 @@ namespace boohcleur
 
 			const bool available = device >= ring.oldestAvailable();
 
-			for (int c = 0; c < config_.numChannels; ++c)
-				layer.data[static_cast<std::size_t>(c)][static_cast<std::size_t>(index)] =
-					available ? ring.sample(std::min(c, ring.numChannels() - 1), device) : 0.0f;
+			if (ensure(layer, index))
+				for (int c = 0; c < config_.numChannels; ++c)
+					sample(layer, c, index) = available ? ring.sample(std::min(c, ring.numChannels() - 1), device) : 0.0f;
 
 			++capture.next;
 			layer.count = capture.next - capture.start;
@@ -397,10 +448,13 @@ namespace boohcleur
 			const float g = (static_cast<float>(i) + 0.5f) / static_cast<float>(fade);
 			const auto index = static_cast<std::size_t>(length - fade + i);
 
+			if (layer.chunks[index / static_cast<std::size_t>(pool_->chunkFrames())] < 0)
+				continue;	// réserve vide pendant la prise : rien à fondre
+
 			for (int c = 0; c < config_.numChannels; ++c)
 			{
-				auto& sample = layer.data[static_cast<std::size_t>(c)][index];
-				sample = sample * (1.0f - g)
+				auto& value = sample(layer, c, static_cast<SamplePos>(index));
+				value = value * (1.0f - g)
 					+ preRoll_[static_cast<std::size_t>(c)][static_cast<std::size_t>(preOffset + i)] * g;
 			}
 		}
@@ -432,6 +486,7 @@ namespace boohcleur
 
 				const int index = numLayers_;
 				layer = &layers_[static_cast<std::size_t>(index)];
+				releaseLayer(*layer);
 				layer->startOffset = locateInLoop(tempoMap, span_, capture.next).offset;
 				layer->count = 0;
 				layer->gain = 1.0f;
@@ -449,11 +504,11 @@ namespace boohcleur
 				gain *= 1.0f - (static_cast<float>(capture.next - capture.end) + 0.5f) / static_cast<float>(fade);
 
 			const bool available = device >= ring.oldestAvailable();
-			const auto index = static_cast<std::size_t>(layer->count);
+			const SamplePos index = layer->count;
 
-			for (int c = 0; c < config_.numChannels; ++c)
-				layer->data[static_cast<std::size_t>(c)][index] =
-					available ? ring.sample(std::min(c, ring.numChannels() - 1), device) * gain : 0.0f;
+			if (ensure(*layer, index))
+				for (int c = 0; c < config_.numChannels; ++c)
+					sample(*layer, c, index) = available ? ring.sample(std::min(c, ring.numChannels() - 1), device) * gain : 0.0f;
 
 			++layer->count;
 			++capture.next;

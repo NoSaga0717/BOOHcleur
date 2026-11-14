@@ -48,7 +48,7 @@ namespace
 BoohcleurEditor::BoohcleurEditor(BoohcleurProcessor& processor)
 	: AudioProcessorEditor(processor)
 	, processor_(processor)
-	, midiPanel_(processor.engine().midiControl())
+	, midiPanel_(processor.engine().midiControl(), numTiles)
 {
 	setLookAndFeel(&lookAndFeel_);
 
@@ -62,7 +62,25 @@ BoohcleurEditor::BoohcleurEditor(BoohcleurProcessor& processor)
 
 	logo_ = juce::ImageCache::getFromMemory(BinaryData::logo_png, BinaryData::logo_pngSize);
 
-	addAndMakeVisible(ring_);
+	for (int t = 0; t < numTiles; ++t)
+	{
+		auto tile = std::make_unique<boohcleur::ui::LoopTile>(t);
+		tile->onTap = [this, t] { select(t); postTo(t, CommandType::TrackMain); };
+		tile->onSelect = [this, t] { select(t); };
+		tile->onVolume = [this, t](float gain) { processor_.engine().setTrackVolume(t, gain); };
+		tile->onMute = [this, t](bool muted) { processor_.engine().setTrackMuted(t, muted); };
+		addAndMakeVisible(*tile);
+		tiles_[static_cast<std::size_t>(t)] = std::move(tile);
+	}
+
+	selectedLabel_.setFont(juce::Font(juce::FontOptions(18.0f, juce::Font::bold)));
+	selectedLabel_.setColour(juce::Label::textColourId, colours::accent);
+	selectedLabel_.setJustificationType(juce::Justification::centredLeft);
+	addAndMakeVisible(selectedLabel_);
+
+	styleCaption(memoryLabel_);
+	memoryLabel_.setJustificationType(juce::Justification::centredLeft);
+	addAndMakeVisible(memoryLabel_);
 
 	styleButton(mainButton_, colours::accent);
 	mainButton_.onClick = [this] { post(CommandType::TrackMain); };
@@ -80,7 +98,7 @@ BoohcleurEditor::BoohcleurEditor(BoohcleurProcessor& processor)
 	clearButton_.onClick = [this] { confirmClear(); };
 	transportButton_.onClick = [this]
 	{
-		post(processor_.engine().transportSnapshot().playing ? CommandType::TransportStop : CommandType::TransportStart);
+		postTo(0, processor_.engine().transportSnapshot().playing ? CommandType::TransportStop : CommandType::TransportStart);
 	};
 
 	midiButton_.onClick = [this] { showMidiPanel(!midiPanel_.isVisible()); };
@@ -106,13 +124,15 @@ BoohcleurEditor::BoohcleurEditor(BoohcleurProcessor& processor)
 	positionLabel_.setJustificationType(juce::Justification::centredRight);
 	addAndMakeVisible(positionLabel_);
 
-	hintLabel_.setText(fr("Clavier : espace = bouton principal  ·  S = stop  ·  Z / Y = undo / redo  ·  C = effacer"),
-		juce::dontSendNotification);
 	styleCaption(hintLabel_);
 	hintLabel_.setJustificationType(juce::Justification::centred);
 	addAndMakeVisible(hintLabel_);
 
-	for (auto* caption : { &tempoCaption_, &quantizeCaption_, &latencyCaption_, &toleranceCaption_, &inputCaption_ })
+	tracksCaption_.setText("Boucles", juce::dontSendNotification);
+	masterCaption_.setText(fr("Volume général"), juce::dontSendNotification);
+
+	for (auto* caption : { &tempoCaption_, &quantizeCaption_, &latencyCaption_, &toleranceCaption_, &inputCaption_,
+			 &tracksCaption_, &masterCaption_ })
 	{
 		styleCaption(*caption);
 		addAndMakeVisible(*caption);
@@ -168,6 +188,27 @@ BoohcleurEditor::BoohcleurEditor(BoohcleurProcessor& processor)
 	inputBox_.setWantsKeyboardFocus(false);
 	addAndMakeVisible(inputBox_);
 
+	for (int n = 1; n <= numTiles; ++n)
+		tracksBox_.addItem(juce::String(n), n);
+
+	tracksBox_.setSelectedId(engine.activeTracks(), juce::dontSendNotification);
+	tracksBox_.onChange = [this]
+	{
+		processor_.engine().setActiveTracks(tracksBox_.getSelectedId());
+		resized();
+	};
+	tracksBox_.setWantsKeyboardFocus(false);
+	tracksBox_.setTooltip(fr("Nombre de boucles affichées et pilotables (les autres gardent leur contenu, muettes)"));
+	addAndMakeVisible(tracksBox_);
+
+	styleSlider(masterSlider_, 0.0, 1.5, 0.01, "");
+	masterSlider_.setTextBoxStyle(juce::Slider::NoTextBox, true, 0, 0);
+	masterSlider_.setSkewFactorFromMidPoint(0.5);
+	masterSlider_.setDoubleClickReturnValue(true, 1.0);
+	masterSlider_.setValue(engine.masterVolume(), juce::dontSendNotification);
+	masterSlider_.onValueChange = [this] { processor_.engine().setMasterVolume(static_cast<float>(masterSlider_.getValue())); };
+	addAndMakeVisible(masterSlider_);
+
 	metronomeToggle_.setToggleState(engine.metronomeEnabled(), juce::dontSendNotification);
 	metronomeToggle_.onClick = [this] { processor_.engine().setMetronomeEnabled(metronomeToggle_.getToggleState()); };
 	monitorToggle_.setToggleState(engine.monitorEnabled(), juce::dontSendNotification);
@@ -181,7 +222,7 @@ BoohcleurEditor::BoohcleurEditor(BoohcleurProcessor& processor)
 	}
 
 	setWantsKeyboardFocus(true);
-	setSize(780, 540);
+	setSize(1040, 720);
 	enableNewMidiInputs();
 	refresh();
 	startTimerHz(30);
@@ -195,7 +236,18 @@ BoohcleurEditor::~BoohcleurEditor()
 
 void BoohcleurEditor::post(CommandType type, double value)
 {
-	processor_.engine().post({ type, 0, value });
+	postTo(processor_.engine().selectedTrack(), type, value);
+}
+
+void BoohcleurEditor::postTo(int track, CommandType type, double value)
+{
+	processor_.engine().post({ type, track, value });
+}
+
+void BoohcleurEditor::select(int track)
+{
+	processor_.engine().setSelectedTrack(track);
+	refresh();
 }
 
 void BoohcleurEditor::showMidiPanel(bool show)
@@ -243,12 +295,15 @@ void BoohcleurEditor::enableNewMidiInputs()
 
 void BoohcleurEditor::confirmClear()
 {
-	juce::AlertWindow::showOkCancelBox(juce::MessageBoxIconType::QuestionIcon, "Effacer la boucle ?",
+	const int track = processor_.engine().selectedTrack();
+
+	juce::AlertWindow::showOkCancelBox(juce::MessageBoxIconType::QuestionIcon,
+		"Effacer la boucle " + juce::String(track + 1) + " ?",
 		fr("Toutes les couches de la boucle seront supprimées."), "Effacer", "Annuler", this,
-		juce::ModalCallbackFunction::create([safe = juce::Component::SafePointer(this)](int result)
+		juce::ModalCallbackFunction::create([safe = juce::Component::SafePointer(this), track](int result)
 		{
 			if (safe != nullptr && result == 1)
-				safe->post(CommandType::TrackClear);
+				safe->postTo(track, CommandType::TrackClear);
 		}));
 }
 
@@ -262,13 +317,24 @@ bool BoohcleurEditor::keyPressed(const juce::KeyPress& key)
 	if (c == 'y')							{ post(CommandType::TrackRedo); return true; }
 	if (c == 'c')							{ confirmClear(); return true; }
 
+	if (c >= '1' && c <= '0' + numTiles)	{ select(static_cast<int>(c - '1')); return true; }
+
+	if (key == juce::KeyPress::leftKey || key == juce::KeyPress::rightKey)
+	{
+		const int count = processor_.engine().activeTracks();
+		const int step = key == juce::KeyPress::rightKey ? 1 : count - 1;
+		select((processor_.engine().selectedTrack() + step) % count);
+		return true;
+	}
+
 	return false;
 }
 
 void BoohcleurEditor::refresh()
 {
 	auto& engine = processor_.engine();
-	const auto track = engine.trackSnapshot(0);
+	const int selected = engine.selectedTrack();
+	const auto track = engine.trackSnapshot(selected);
 	const auto transport = engine.transportSnapshot();
 
 	++frame_;
@@ -281,12 +347,40 @@ void BoohcleurEditor::refresh()
 	if (midiPanel_.isVisible())
 		midiPanel_.refresh(control, (frame_ / 8) % 2 == 0);
 
+	if (engine.activeTracks() != shownTiles_)
+	{
+		tracksBox_.setSelectedId(engine.activeTracks(), juce::dontSendNotification);
+		resized();
+	}
+
 	boohcleur::ui::LoopRing::Model model;
-	model.track = track;
 	model.transport = transport;
 	model.sampleRate = processor_.getSampleRate() > 0.0 ? processor_.getSampleRate() : 48000.0;
 	model.blink = (frame_ / 8) % 2 == 0;
-	ring_.setModel(model);
+
+	for (int t = 0; t < numTiles; ++t)
+	{
+		model.track = engine.trackSnapshot(t);
+		tiles_[static_cast<std::size_t>(t)]->setModel(model, t == selected, engine.trackVolume(t), engine.trackMuted(t));
+	}
+
+	selectedLabel_.setText("Boucle " + juce::String(selected + 1) + fr("  ·  ") + boohcleur::ui::stateLabel(track.state),
+		juce::dontSendNotification);
+
+	const auto memory = engine.memorySnapshot();
+
+	if (memory.totalBytes > 0)
+	{
+		const int percent = static_cast<int>(std::lround(100.0 * static_cast<double>(memory.usedBytes) / static_cast<double>(memory.totalBytes)));
+		const int minutes = static_cast<int>(memory.secondsLeft / 60.0);
+		memoryLabel_.setText(memory.secondsLeft <= 0.0
+				? fr("Mémoire pleine : effacez une boucle")
+				: fr("Mémoire ") + juce::String(percent) + fr(" %  ·  reste ") + juce::String(minutes) + " min "
+					+ juce::String(static_cast<int>(memory.secondsLeft) % 60).paddedLeft('0', 2) + " s",
+			juce::dontSendNotification);
+		memoryLabel_.setColour(juce::Label::textColourId,
+			memory.secondsLeft < 60.0 ? colours::forState(TrackState::Recording) : colours::textDim);
+	}
 
 	juce::String main;
 
@@ -326,15 +420,41 @@ void BoohcleurEditor::refresh()
 	}
 	else
 	{
-		hintLabel_.setText(fr("Clavier : espace = bouton principal  ·  S = stop  ·  Z / Y = undo / redo  ·  C = effacer"),
-			juce::dontSendNotification);
+		hintLabel_.setText(fr("Clic sur une boucle = son bouton principal  ·  1 à 6 ou ← → = choisir  ·  espace = principal  ·  "
+			"S = stop  ·  Z / Y = undo / redo  ·  C = effacer"), juce::dontSendNotification);
 		hintLabel_.setColour(juce::Label::textColourId, colours::textDim);
 	}
 
+	for (int n = 1; n <= numTiles; ++n)
+		tracksBox_.addItem(juce::String(n), n);
+
+	tracksBox_.setSelectedId(engine.activeTracks(), juce::dontSendNotification);
+	tracksBox_.onChange = [this]
+	{
+		processor_.engine().setActiveTracks(tracksBox_.getSelectedId());
+		resized();
+	};
+	tracksBox_.setWantsKeyboardFocus(false);
+	tracksBox_.setTooltip(fr("Nombre de boucles affichées et pilotables (les autres gardent leur contenu, muettes)"));
+	addAndMakeVisible(tracksBox_);
+
+	styleSlider(masterSlider_, 0.0, 1.5, 0.01, "");
+	masterSlider_.setTextBoxStyle(juce::Slider::NoTextBox, true, 0, 0);
+	masterSlider_.setSkewFactorFromMidPoint(0.5);
+	masterSlider_.setDoubleClickReturnValue(true, 1.0);
+	masterSlider_.setValue(engine.masterVolume(), juce::dontSendNotification);
+	masterSlider_.onValueChange = [this] { processor_.engine().setMasterVolume(static_cast<float>(masterSlider_.getValue())); };
+	addAndMakeVisible(masterSlider_);
+
 	metronomeToggle_.setToggleState(engine.metronomeEnabled(), juce::dontSendNotification);
 
-	// Tempo modifiable seulement transport arrêté et boucle vide (ADR 0001, arbitrage 5).
-	tempoSlider_.setEnabled(!transport.playing && track.state == TrackState::Empty && track.numLayers == 0);
+	// Tempo modifiable seulement transport arrêté et boucles vides (ADR 0001, arbitrage 5).
+	bool allEmpty = true;
+
+	for (int t = 0; t < engine.numTracks(); ++t)
+		allEmpty = allEmpty && engine.trackSnapshot(t).state == TrackState::Empty && engine.trackSnapshot(t).numLayers == 0;
+
+	tempoSlider_.setEnabled(!transport.playing && allEmpty);
 }
 
 void BoohcleurEditor::paint(juce::Graphics& g)
@@ -355,6 +475,24 @@ void BoohcleurEditor::paint(juce::Graphics& g)
 	g.fillRoundedRectangle(settings.toFloat(), 10.0f);
 }
 
+void BoohcleurEditor::layoutTiles(juce::Rectangle<int> area)
+{
+	shownTiles_ = processor_.engine().activeTracks();
+	const int columns = shownTiles_ <= 3 ? shownTiles_ : 3;
+	const int rows = (shownTiles_ + columns - 1) / columns;
+	const int width = area.getWidth() / columns;
+	const int height = juce::jmin(area.getHeight() / rows, width + 30);
+
+	for (int t = 0; t < numTiles; ++t)
+	{
+		auto& tile = *tiles_[static_cast<std::size_t>(t)];
+		tile.setVisible(t < shownTiles_);
+
+		if (t < shownTiles_)
+			tile.setBounds(area.getX() + (t % columns) * width, area.getY() + (t / columns) * height, width, height);
+	}
+}
+
 void BoohcleurEditor::resized()
 {
 	auto area = getLocalBounds();
@@ -366,48 +504,63 @@ void BoohcleurEditor::resized()
 	header.removeFromRight(10);
 	midiButton_.setBounds(header.removeFromRight(80));
 	header.removeFromRight(16);
-	positionLabel_.setBounds(header.removeFromRight(360));
+	positionLabel_.setBounds(header.removeFromRight(400));
 
 	auto settings = area.removeFromBottom(150).reduced(16, 12).reduced(16, 12);
 	hintLabel_.setBounds(area.removeFromBottom(24));
 
-	auto main = area.reduced(16, 12);
-	ring_.setBounds(main.removeFromLeft(main.getHeight()).reduced(8));
-	main.removeFromLeft(24);
+	auto main = area.reduced(12, 10);
 
-	auto controls = main.withSizeKeepingCentre(main.getWidth(), 200);
-	mainButton_.setBounds(controls.removeFromTop(110));
-	controls.removeFromTop(14);
+	// Commandes de la boucle sélectionnée, à droite.
+	auto controls = main.removeFromRight(300);
+	main.removeFromRight(12);
+	controls = controls.withSizeKeepingCentre(controls.getWidth(), juce::jmin(controls.getHeight(), 330));
+	selectedLabel_.setBounds(controls.removeFromTop(28));
+	controls.removeFromTop(6);
+	mainButton_.setBounds(controls.removeFromTop(120));
+	controls.removeFromTop(12);
 
-	auto row = controls.removeFromTop(48);
-	const int width = (row.getWidth() - 3 * 10) / 4;
-
-	for (auto* button : { &stopButton_, &undoButton_, &redoButton_, &clearButton_ })
+	for (auto pair : { std::pair { &stopButton_, &undoButton_ }, std::pair { &redoButton_, &clearButton_ } })
 	{
-		button->setBounds(row.removeFromLeft(width));
+		auto row = controls.removeFromTop(54);
+		pair.first->setBounds(row.removeFromLeft((row.getWidth() - 10) / 2));
 		row.removeFromLeft(10);
+		pair.second->setBounds(row);
+		controls.removeFromTop(10);
 	}
 
-	auto column = [&settings](int width) { return settings.removeFromLeft(width).reduced(6, 0); };
+	memoryLabel_.setBounds(controls.removeFromTop(22));
 
-	auto left = column(settings.getWidth() / 3);
-	tempoCaption_.setBounds(left.removeFromTop(20));
-	tempoSlider_.setBounds(left.removeFromTop(28));
-	left.removeFromTop(8);
-	quantizeCaption_.setBounds(left.removeFromTop(20));
-	quantizeBox_.setBounds(left.removeFromTop(28).withWidth(150));
+	tilesArea_ = main;
+	layoutTiles(main);
 
-	auto middle = column(settings.getWidth() / 2);
-	latencyCaption_.setBounds(middle.removeFromTop(20));
-	latencySlider_.setBounds(middle.removeFromTop(28));
-	middle.removeFromTop(8);
-	toleranceCaption_.setBounds(middle.removeFromTop(20));
-	toleranceSlider_.setBounds(middle.removeFromTop(28));
+	auto column = [&settings](int width) { return settings.removeFromLeft(width).reduced(8, 0); };
 
-	auto right = column(settings.getWidth());
-	inputCaption_.setBounds(right.removeFromTop(20));
-	inputBox_.setBounds(right.removeFromTop(28));
-	right.removeFromTop(6);
-	metronomeToggle_.setBounds(right.removeFromTop(24));
-	monitorToggle_.setBounds(right.removeFromTop(24));
+	auto first = column(settings.getWidth() / 4);
+	tempoCaption_.setBounds(first.removeFromTop(20));
+	tempoSlider_.setBounds(first.removeFromTop(28));
+	first.removeFromTop(8);
+	quantizeCaption_.setBounds(first.removeFromTop(20));
+	quantizeBox_.setBounds(first.removeFromTop(28).withWidth(150));
+
+	auto second = column(settings.getWidth() / 3);
+	latencyCaption_.setBounds(second.removeFromTop(20));
+	latencySlider_.setBounds(second.removeFromTop(28));
+	second.removeFromTop(8);
+	toleranceCaption_.setBounds(second.removeFromTop(20));
+	toleranceSlider_.setBounds(second.removeFromTop(28));
+
+	auto third = column(settings.getWidth() / 2);
+	tracksCaption_.setBounds(third.removeFromTop(20));
+	tracksBox_.setBounds(third.removeFromTop(28).withWidth(80));
+	third.removeFromTop(8);
+	masterCaption_.setBounds(third.removeFromTop(20));
+	masterSlider_.setBounds(third.removeFromTop(28));
+
+	auto fourth = column(settings.getWidth());
+	inputCaption_.setBounds(fourth.removeFromTop(20));
+	inputBox_.setBounds(fourth.removeFromTop(28));
+	fourth.removeFromTop(6);
+	metronomeToggle_.setBounds(fourth.removeFromTop(24));
+	monitorToggle_.setBounds(fourth.removeFromTop(24));
 }

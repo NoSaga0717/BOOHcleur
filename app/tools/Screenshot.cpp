@@ -2,7 +2,7 @@
 // ni fenêtre. Le moteur est piloté hors ligne pour montrer un état réaliste.
 //
 // Usage : boohcleur-screenshot <fichier.png> [scénario]
-// Scénarios : overdub (défaut), armed, recording, empty, midi
+// Scénarios : loops (défaut), overdub, armed, recording, empty, midi
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
@@ -37,13 +37,13 @@ int main(int argc, char* argv[])
 {
 	if (argc < 2)
 	{
-		std::fprintf(stderr, "usage : %s <fichier.png> [overdub|armed|recording|empty|midi]\n", argv[0]);
+		std::fprintf(stderr, "usage : %s <fichier.png> [loops|overdub|armed|recording|empty|midi]\n", argv[0]);
 		return 1;
 	}
 
 	juce::ScopedJuceInitialiser_GUI gui;
 
-	const juce::String scenario = argc > 2 ? juce::String(argv[2]) : juce::String("overdub");
+	const juce::String scenario = argc > 2 ? juce::String(argv[2]) : juce::String("loops");
 
 	BoohcleurProcessor processor;
 	processor.setRateAndBufferSizeDetails(sampleRate, blockSize);
@@ -55,7 +55,33 @@ int main(int argc, char* argv[])
 	std::int64_t sample = 0;
 	using boohcleur::CommandType;
 
-	if (scenario == "armed")
+	if (scenario == "loops")
+	{
+		// Une session en cours : 4 boucles de longueurs différentes, une en prise.
+		auto post = [&engine](CommandType type, int track) { engine.post({ type, track, 0.0 }); };
+		post(CommandType::TrackMain, 0);
+		run(engine, sample, bar * 4);
+		post(CommandType::TrackMain, 0);					// boucle 1 : 4 mesures
+		post(CommandType::TrackMain, 1);
+		run(engine, sample, bar * 5 + 1000);
+		post(CommandType::TrackMain, 0);					// overdub sur la boucle 1
+		run(engine, sample, bar * 6);
+		post(CommandType::TrackMain, 1);					// boucle 2 : 2 mesures
+		post(CommandType::TrackMain, 0);
+		post(CommandType::TrackMain, 2);
+		run(engine, sample, bar * 8);
+		post(CommandType::TrackMain, 2);					// boucle 3 : 1 mesure
+		run(engine, sample, bar * 9);
+		post(CommandType::TrackStop, 2);
+		post(CommandType::TrackMain, 3);					// boucle 4 : prise en cours
+		run(engine, sample, bar * 11 + 40000);
+		post(CommandType::TrackMain, 1);					// overdub en cours sur la boucle 2
+		run(engine, sample, bar * 11 + 70000);
+		engine.setTrackVolume(1, 0.7f);
+		engine.setTrackMuted(2, true);
+		engine.setSelectedTrack(1);
+	}
+	else if (scenario == "armed")
 	{
 		run(engine, sample, bar * 2 + 30000);
 		engine.post({ CommandType::TrackMain, 0, 0.0 });
