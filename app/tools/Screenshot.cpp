@@ -2,7 +2,7 @@
 // ni fenêtre. Le moteur est piloté hors ligne pour montrer un état réaliste.
 //
 // Usage : boohcleur-screenshot <fichier.png> [scénario]
-// Scénarios : overdub (défaut), armed, recording, empty
+// Scénarios : overdub (défaut), armed, recording, empty, midi
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
@@ -37,7 +37,7 @@ int main(int argc, char* argv[])
 {
 	if (argc < 2)
 	{
-		std::fprintf(stderr, "usage : %s <fichier.png> [overdub|armed|recording|empty]\n", argv[0]);
+		std::fprintf(stderr, "usage : %s <fichier.png> [overdub|armed|recording|empty|midi]\n", argv[0]);
 		return 1;
 	}
 
@@ -79,12 +79,51 @@ int main(int argc, char* argv[])
 		engine.post({ CommandType::TrackMain, 0, 0.0 });	// overdub 2 en cours
 		run(engine, sample, bar * 10 + 50000);
 	}
+	else if (scenario == "midi")
+	{
+		// Pédalier type : 4 pédales en CC, une à bascule, apprentissage en cours.
+		using namespace boohcleur;
+		auto add = [&engine](int cc, Gesture gesture, ControlAction action, PressMode mode = PressMode::Momentary)
+		{
+			ControlRequest r;
+			r.type = ControlRequest::Type::AddBinding;
+			r.binding.source = { MidiSourceKind::ControlChange, 1, static_cast<std::uint8_t>(cc) };
+			r.binding.gesture = gesture;
+			r.binding.action = action;
+			r.binding.mode = mode;
+			engine.midiControl().request(r);
+		};
+
+		add(20, Gesture::Short, ControlAction::TrackMain);
+		add(20, Gesture::Long, ControlAction::TrackUndo);
+		add(21, Gesture::Short, ControlAction::TrackStop);
+		add(21, Gesture::Double, ControlAction::TrackClear);
+		add(22, Gesture::Short, ControlAction::TrackRedo);
+		add(23, Gesture::Short, ControlAction::MetronomeToggle, PressMode::EveryMessage);
+
+		std::vector<float> zero(blockSize), outL(blockSize), outR(blockSize);
+		const float* in[1] = { zero.data() };
+		float* out[2] = { outL.data(), outR.data() };
+		const MidiEvent events[] = { { 0xB0, 22, 127, 0 }, { 0xB0, 22, 0, 60 } };
+		engine.process(in, 1, out, 2, blockSize);
+		sample += blockSize;
+		run(engine, sample, bar);
+		engine.process(in, 1, out, 2, blockSize, events, 2);
+		sample += blockSize;
+
+		ControlRequest learn;
+		learn.type = ControlRequest::Type::StartLearn;
+		learn.binding.action = ControlAction::TransportToggle;
+		engine.midiControl().request(learn);
+		run(engine, sample, bar + 20000);
+	}
 	else
 	{
 		run(engine, sample, bar + 20000);
 	}
 
 	BoohcleurEditor editor(processor);
+	editor.setMidiPanelVisible(scenario == "midi");
 	editor.refresh();
 
 	const auto image = editor.createComponentSnapshot(editor.getLocalBounds(), true, 2.0f);

@@ -30,6 +30,7 @@ target_sources(BOOHcleur PRIVATE
 	Source/PluginProcessor.cpp
 	Source/PluginEditor.cpp
 	Source/LoopRing.cpp
+	Source/MidiPanel.cpp
 )
 
 target_compile_definitions(BOOHcleur PUBLIC
@@ -61,6 +62,7 @@ if (BOOHCLEUR_BUILD_SCREENSHOT)
 		Source/PluginProcessor.cpp
 		Source/PluginEditor.cpp
 		Source/LoopRing.cpp
+		Source/MidiPanel.cpp
 	)
 
 	target_compile_definitions(boohcleur-screenshot PRIVATE

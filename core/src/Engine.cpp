@@ -54,6 +54,8 @@ namespace boohcleur
 		{
 		}
 
+		midi_.prepare(config.sampleRate);
+
 		clickLength_ = static_cast<int>(0.02 * config.sampleRate);
 		clickRemaining_ = 0;
 
@@ -79,7 +81,8 @@ namespace boohcleur
 		return musicalOrigin_ + latencySamples_.load(std::memory_order_relaxed);
 	}
 
-	void Engine::process(const float* const* in, int numIn, float* const* out, int numOut, int numFrames) noexcept
+	void Engine::process(const float* const* in, int numIn, float* const* out, int numOut, int numFrames,
+		const MidiEvent* midi, int numMidi) noexcept
 	{
 		if (tracks_.empty() || numFrames <= 0)
 			return;
@@ -113,6 +116,26 @@ namespace boohcleur
 
 		while (auto command = commands_.pop())
 			handleCommand(*command, clock_.blockStart());
+
+		// Pédalier : gestes reconnus dans ce bloc, horodatés à l'appui.
+		{
+			midi_.processRequests();
+			TriggerList triggers;
+
+			for (int i = 0; midi != nullptr && i < numMidi; ++i)
+			{
+				MidiEvent event = midi[i];
+				event.device = deviceSample_ + std::clamp<std::int64_t>(event.device, 0, numFrames - 1);
+				midi_.onMidi(event, triggers);
+			}
+
+			midi_.update(deviceSample_ + numFrames - 1, triggers);
+
+			for (int i = 0; i < triggers.count; ++i)
+				handleTrigger(triggers.items[static_cast<std::size_t>(i)], clock_.blockStart());
+
+			midi_.publish();
+		}
 
 		const SamplePos blockStart = clock_.blockStart();
 
@@ -190,10 +213,49 @@ namespace boohcleur
 		}
 	}
 
+	void Engine::handleTrigger(const Trigger& trigger, SamplePos blockStart) noexcept
+	{
+		Command command;
+		command.track = trigger.track;
+		command.pressDevice = trigger.pressDevice;
+
+		switch (trigger.action)
+		{
+		case ControlAction::TrackMain: command.type = CommandType::TrackMain; break;
+		case ControlAction::TrackStop: command.type = CommandType::TrackStop; break;
+		case ControlAction::TrackPlay: command.type = CommandType::TrackPlay; break;
+		case ControlAction::TrackUndo: command.type = CommandType::TrackUndo; break;
+		case ControlAction::TrackRedo: command.type = CommandType::TrackRedo; break;
+		case ControlAction::TrackClear: command.type = CommandType::TrackClear; break;
+
+		case ControlAction::TransportToggle:
+			command.type = clock_.isPlaying() && transportStopAt_ < 0 ? CommandType::TransportStop : CommandType::TransportStart;
+			break;
+
+		case ControlAction::MetronomeToggle:
+			metronome_.store(!metronome_.load(std::memory_order_relaxed), std::memory_order_relaxed);
+			return;
+
+		case ControlAction::None:
+		case ControlAction::Count:
+			return;
+		}
+
+		handleCommand(command, blockStart);
+	}
+
 	void Engine::handleCommand(const Command& command, SamplePos blockStart) noexcept
 	{
 		const bool playing = clock_.isPlaying() && transportStopAt_ < 0;
-		const Tick pressTick = tempoMap_.tickAtOrBefore(blockStart);
+
+		// Le pédalier date l'appui : la quantification part du moment où le pied
+		// a appuyé, même si le geste (appui long, double) a été reconnu plus tard.
+		SamplePos pressSample = blockStart;
+
+		if (command.pressDevice >= 0 && playing)
+			pressSample = std::max<SamplePos>(0, command.pressDevice - musicalOrigin_);
+
+		const Tick pressTick = tempoMap_.tickAtOrBefore(pressSample);
 		const bool validTrack = command.track >= 0 && command.track < numTracks();
 		auto* track = validTrack ? &tracks_[static_cast<std::size_t>(command.track)] : nullptr;
 		auto* pending = validTrack ? &pending_[static_cast<std::size_t>(command.track)] : nullptr;

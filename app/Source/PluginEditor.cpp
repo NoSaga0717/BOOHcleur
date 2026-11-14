@@ -1,6 +1,13 @@
 #include "PluginEditor.h"
 
+#include <juce_audio_devices/juce_audio_devices.h>
+#include <juce_audio_utils/juce_audio_utils.h>
+
 #include "BinaryData.h"
+
+#if JucePlugin_Build_Standalone
+	#include <juce_audio_plugin_client/Standalone/juce_StandaloneFilterWindow.h>
+#endif
 
 using boohcleur::CommandType;
 using boohcleur::TrackState;
@@ -41,6 +48,7 @@ namespace
 BoohcleurEditor::BoohcleurEditor(BoohcleurProcessor& processor)
 	: AudioProcessorEditor(processor)
 	, processor_(processor)
+	, midiPanel_(processor.engine().midiControl())
 {
 	setLookAndFeel(&lookAndFeel_);
 
@@ -60,7 +68,7 @@ BoohcleurEditor::BoohcleurEditor(BoohcleurProcessor& processor)
 	mainButton_.onClick = [this] { post(CommandType::TrackMain); };
 	addAndMakeVisible(mainButton_);
 
-	for (auto* button : { &stopButton_, &undoButton_, &redoButton_, &clearButton_, &transportButton_ })
+	for (auto* button : { &stopButton_, &undoButton_, &redoButton_, &clearButton_, &transportButton_, &midiButton_ })
 	{
 		styleButton(*button, colours::accent);
 		addAndMakeVisible(*button);
@@ -74,6 +82,24 @@ BoohcleurEditor::BoohcleurEditor(BoohcleurProcessor& processor)
 	{
 		post(processor_.engine().transportSnapshot().playing ? CommandType::TransportStop : CommandType::TransportStart);
 	};
+
+	midiButton_.onClick = [this] { showMidiPanel(!midiPanel_.isVisible()); };
+	midiButton_.setTooltip(fr("Pédalier MIDI : affectations et apprentissage"));
+
+	midiPanel_.onClose = [this] { showMidiPanel(false); };
+
+#if JucePlugin_Build_Standalone
+	if (processor_.wrapperType == juce::AudioProcessor::wrapperType_Standalone)
+	{
+		midiPanel_.onOpenDeviceSettings = []
+		{
+			if (auto* holder = juce::StandalonePluginHolder::getInstance())
+				holder->showAudioSettingsDialog();
+		};
+	}
+#endif
+
+	addChildComponent(midiPanel_);
 
 	positionLabel_.setColour(juce::Label::textColourId, colours::text);
 	positionLabel_.setFont(juce::Font(juce::FontOptions(22.0f, juce::Font::bold)));
@@ -156,6 +182,7 @@ BoohcleurEditor::BoohcleurEditor(BoohcleurProcessor& processor)
 
 	setWantsKeyboardFocus(true);
 	setSize(780, 540);
+	enableNewMidiInputs();
 	refresh();
 	startTimerHz(30);
 }
@@ -169,6 +196,49 @@ BoohcleurEditor::~BoohcleurEditor()
 void BoohcleurEditor::post(CommandType type, double value)
 {
 	processor_.engine().post({ type, 0, value });
+}
+
+void BoohcleurEditor::showMidiPanel(bool show)
+{
+	midiPanel_.setVisible(show);
+	midiButton_.setToggleState(show, juce::dontSendNotification);
+
+	if (show)
+	{
+		midiPanel_.toFront(false);
+		resized();
+	}
+	else
+	{
+		boohcleur::ControlRequest cancel;
+		cancel.type = boohcleur::ControlRequest::Type::CancelLearn;
+		processor_.engine().midiControl().request(cancel);
+	}
+}
+
+// Standalone : un pédalier branché doit marcher sans passer par les réglages.
+// Chaque nouvelle entrée MIDI est activée une fois ; si on la désactive ensuite
+// dans les réglages, elle le reste.
+void BoohcleurEditor::enableNewMidiInputs()
+{
+#if JucePlugin_Build_Standalone
+	if (processor_.wrapperType != juce::AudioProcessor::wrapperType_Standalone)
+		return;
+
+	auto* holder = juce::StandalonePluginHolder::getInstance();
+
+	if (holder == nullptr)
+		return;
+
+	for (const auto& device : juce::MidiInput::getAvailableDevices())
+	{
+		if (knownMidiInputs_.contains(device.identifier))
+			continue;
+
+		knownMidiInputs_.add(device.identifier);
+		holder->deviceManager.setMidiInputDeviceEnabled(device.identifier, true);
+	}
+#endif
 }
 
 void BoohcleurEditor::confirmClear()
@@ -202,6 +272,14 @@ void BoohcleurEditor::refresh()
 	const auto transport = engine.transportSnapshot();
 
 	++frame_;
+
+	if (frame_ % 60 == 0)
+		enableNewMidiInputs();	// pédalier branché en cours de route
+
+	const auto control = engine.midiControl().snapshot();
+
+	if (midiPanel_.isVisible())
+		midiPanel_.refresh(control, (frame_ / 8) % 2 == 0);
 
 	boohcleur::ui::LoopRing::Model model;
 	model.track = track;
@@ -240,6 +318,21 @@ void BoohcleurEditor::refresh()
 	positionLabel_.setText("Mesure " + juce::String(bbt.bar + 1) + fr("  ·  Temps ") + juce::String(bbt.beat + 1)
 		+ "     " + juce::String(transport.bpm, 1) + " BPM", juce::dontSendNotification);
 
+	// Garde-fou du pédalier : le premier appui sur « effacer » arme pendant 2 s.
+	if (control.clearArmed)
+	{
+		hintLabel_.setText(fr("Appuyez encore sur la pédale « effacer » pour confirmer"), juce::dontSendNotification);
+		hintLabel_.setColour(juce::Label::textColourId, colours::forState(TrackState::Recording));
+	}
+	else
+	{
+		hintLabel_.setText(fr("Clavier : espace = bouton principal  ·  S = stop  ·  Z / Y = undo / redo  ·  C = effacer"),
+			juce::dontSendNotification);
+		hintLabel_.setColour(juce::Label::textColourId, colours::textDim);
+	}
+
+	metronomeToggle_.setToggleState(engine.metronomeEnabled(), juce::dontSendNotification);
+
 	// Tempo modifiable seulement transport arrêté et boucle vide (ADR 0001, arbitrage 5).
 	tempoSlider_.setEnabled(!transport.playing && track.state == TrackState::Empty && track.numLayers == 0);
 }
@@ -266,8 +359,12 @@ void BoohcleurEditor::resized()
 {
 	auto area = getLocalBounds();
 
+	midiPanel_.setBounds(area.withTrimmedTop(80));
+
 	auto header = area.removeFromTop(80).reduced(16, 18);
 	transportButton_.setBounds(header.removeFromRight(130));
+	header.removeFromRight(10);
+	midiButton_.setBounds(header.removeFromRight(80));
 	header.removeFromRight(16);
 	positionLabel_.setBounds(header.removeFromRight(360));
 
