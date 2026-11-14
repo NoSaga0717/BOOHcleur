@@ -51,6 +51,9 @@ android {
 					"-DANDROID_CPP_FEATURES=exceptions rtti",
 					"-DANDROID_ARM_MODE=arm",
 					"-DANDROID_ARM_NEON=TRUE",
+					// Liaison faible des API récentes du NDK (polices Android 29+),
+					// JUCE vérifie leur présence à l'exécution.
+					"-DANDROID_WEAK_API_DEFS=ON",
 				)
 				cFlags += "-fsigned-char"
 				cppFlags += "-fsigned-char"
