@@ -3,9 +3,10 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include "LoopRing.h"
+#include "MidiPanel.h"
 #include "PluginProcessor.h"
 
-// Interface J2 : une boucle, ses commandes et les réglages utiles pour jouer.
+// Interface J3 : une boucle, ses commandes, les réglages utiles pour jouer et le pédalier MIDI.
 // Mise en page fixe pour l'instant ; le canevas libre arrive en J5b (ADR 0001, D9).
 class BoohcleurEditor final : public juce::AudioProcessorEditor, private juce::Timer
 {
@@ -19,11 +20,14 @@ public:
 
 	// Relit l'état du moteur (appelé par le timer ; public pour les captures d'écran).
 	void refresh();
+	void setMidiPanelVisible(bool visible) { showMidiPanel(visible); }
 
 private:
 	void timerCallback() override { refresh(); }
 	void post(boohcleur::CommandType type, double value = 0.0);
 	void confirmClear();
+	void showMidiPanel(bool show);
+	void enableNewMidiInputs();
 
 	BoohcleurProcessor& processor_;
 	boohcleur::ui::LookAndFeel lookAndFeel_;
@@ -32,7 +36,10 @@ private:
 	boohcleur::ui::LoopRing ring_;
 
 	juce::TextButton mainButton_, stopButton_ { "STOP" }, undoButton_ { "UNDO" },
-		redoButton_ { "REDO" }, clearButton_ { "CLEAR" }, transportButton_;
+		redoButton_ { "REDO" }, clearButton_ { "CLEAR" }, transportButton_, midiButton_ { "MIDI" };
+
+	boohcleur::ui::MidiPanel midiPanel_;
+	juce::StringArray knownMidiInputs_;
 
 	juce::Label positionLabel_, hintLabel_;
 	juce::Label tempoCaption_, quantizeCaption_, latencyCaption_, toleranceCaption_, inputCaption_;

@@ -6,6 +6,7 @@ add_library(boohcleur-core
 	src/TransportClock.cpp
 	src/InputRingBuffer.cpp
 	src/LoopTrack.cpp
+	src/MidiControl.cpp
 	src/Engine.cpp
 )
 add_library(boohcleur::core ALIAS boohcleur-core)

@@ -40,7 +40,7 @@ C'est ce qui rend le portage possible plus tard : la tête n'a pas JUCE. La vers
 | `core` | STL | Horloge musicale, pistes, couches, ordonnanceur de commandes, mixeur, tampon de pré-enregistrement, fondus. Seul code exécuté sur le thread audio. | J0 à J3 |
 | `analysis` | core | Détection d'attaques, association à la grille, carte de déformation (warp map). Calcul pur et déterministe. | V2 |
 | `render` | analysis, Signalsmith Stretch (MIT) | Rendu corrigé d'une couche à partir de la source et de la warp map. | V2 |
-| `control` | core | MIDI Learn, gestes (appui court, long, double), actions, protocole de commandes et d'état commun aux interfaces. | J5 |
+| `control` | core | MIDI Learn, gestes (appui court, long, double), actions, protocole de commandes et d'état commun aux interfaces. | J3 (`MidiControl`, logé dans `core` tant qu'il tient en un fichier), J5 |
 | `session` | core, dr_libs, JSON | Manifeste versionné, WAV float32, écriture atomique, migration, récupération après crash. | J6 |
 | `juce` | tous + JUCE | AudioProcessor, Standalone, VST3, AU, interface de bureau. | J2, J6 |
 | `stompbox` | core, control | Adaptateur pour la tête (version lite). | Après V1 |

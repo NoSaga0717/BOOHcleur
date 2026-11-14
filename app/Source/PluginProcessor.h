@@ -35,8 +35,9 @@ public:
 	const juce::String getProgramName(int) override { return {}; }
 	void changeProgramName(int, const juce::String&) override {}
 
-	void getStateInformation(juce::MemoryBlock&) override {}
-	void setStateInformation(const void*, int) override {}
+	// Réglages et affectations MIDI (le Standalone les garde d'une session à l'autre).
+	void getStateInformation(juce::MemoryBlock& data) override;
+	void setStateInformation(const void* data, int size) override;
 
 	boohcleur::Engine& engine() noexcept { return engine_; }
 	bool isPrepared() const noexcept { return prepared_.load(); }
@@ -51,7 +52,9 @@ private:
 	std::atomic<bool> prepared_ { false };
 	std::atomic<double> latencyMs_ { 0.0 };
 	std::atomic<double> sampleRate_ { 48000.0 };
+	std::atomic<double> savedBpm_ { 120.0 };
 	int maxBlock_ = 0;
+	std::vector<boohcleur::MidiEvent> midiEvents_;
 
 	JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(BoohcleurProcessor)
 };

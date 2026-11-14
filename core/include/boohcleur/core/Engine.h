@@ -3,6 +3,7 @@
 #include "boohcleur/core/Grid.h"
 #include "boohcleur/core/InputRingBuffer.h"
 #include "boohcleur/core/LoopTrack.h"
+#include "boohcleur/core/MidiControl.h"
 #include "boohcleur/core/SpscQueue.h"
 #include "boohcleur/core/TransportClock.h"
 
@@ -55,6 +56,9 @@ namespace boohcleur
 		CommandType type = CommandType::TrackMain;
 		int track = 0;
 		double value = 0.0;
+		// Instant de l'appui en échantillons de l'appareil (pédalier MIDI) ;
+		// -1 : début du bloc où la commande est traitée (interface).
+		std::int64_t pressDevice = -1;
 	};
 
 	// Action planifiée sur une piste, en attente de sa frontière.
@@ -104,7 +108,14 @@ namespace boohcleur
 		const EngineConfig& config() const noexcept { return config_; }
 
 		// in : numIn pointeurs (1 = mono, dupliqué) ; out : numOut pointeurs.
-		void process(const float* const* in, int numIn, float* const* out, int numOut, int numFrames) noexcept;
+		// midi : messages du bloc, leur champ device étant le décalage dans le bloc
+		// (0 à numFrames - 1), dans l'ordre chronologique.
+		void process(const float* const* in, int numIn, float* const* out, int numOut, int numFrames,
+			const MidiEvent* midi = nullptr, int numMidi = 0) noexcept;
+
+		// Pilotage au pied : affectations, MIDI Learn, état publié pour l'interface.
+		MidiControl& midiControl() noexcept { return midi_; }
+		const MidiControl& midiControl() const noexcept { return midi_; }
 
 		// Rend false si la file de commandes est pleine.
 		bool post(const Command& command) noexcept;
@@ -147,6 +158,7 @@ namespace boohcleur
 		};
 
 		void handleCommand(const Command& command, SamplePos blockStart) noexcept;
+		void handleTrigger(const Trigger& trigger, SamplePos blockStart) noexcept;
 		void handleTrackMain(int index, Tick pressTick, SamplePos blockStart) noexcept;
 		void schedule(int index, PendingAction action, Tick pressTick, SamplePos blockStart) noexcept;
 		void execute(int index, const Pending& pending, SamplePos at) noexcept;
@@ -164,6 +176,7 @@ namespace boohcleur
 		std::vector<std::vector<float>> scratch_;
 
 		SpscQueue<Command, 256> commands_;
+		MidiControl midi_;
 
 		std::int64_t deviceSample_ = 0;			// compteur de l'appareil, ne s'arrête jamais
 		std::int64_t musicalOrigin_ = 0;		// index d'appareil de la position musicale 0

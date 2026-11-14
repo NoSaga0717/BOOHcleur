@@ -6,7 +6,7 @@ Looper guitare multipiste avec **Smart Quantize** : il corrige le placement des 
 
 ## Où on en est
 
-J2 : une boucle jouable dans une application Standalone (Mac et Windows) : enregistrement quantifié à la mesure, lecture, overdubs en couches, undo/redo, métronome, latence réglable à la main. L'architecture est dans [`docs/adr/0001-architecture.md`](docs/adr/0001-architecture.md). Prochain jalon : J3, pilotage au pied en MIDI.
+J3 : une boucle jouable dans une application Standalone (Mac et Windows), à la main ou au pied : enregistrement quantifié à la mesure, lecture, overdubs en couches, undo/redo, métronome, latence réglable à la main, pédalier MIDI (apprentissage, appui court, long et double). L'architecture est dans [`docs/adr/0001-architecture.md`](docs/adr/0001-architecture.md). Prochain jalon : J4, plusieurs boucles et mixeur.
 
 | Document | Contenu |
 | --- | --- |
@@ -14,7 +14,7 @@ J2 : une boucle jouable dans une application Standalone (Mac et Windows) : enreg
 | [`docs/adr/`](docs/adr/README.md) | Décisions d'architecture (ADR), une par fichier |
 | [`AGENTS.md`](AGENTS.md) | Règles pour les IA qui travaillent sur le dépôt |
 
-<p align="center"><img src="docs/images/interface-j2.png" alt="Interface J2" width="640"></p>
+<p align="center"><img src="docs/images/interface-j2.png" alt="Interface" width="640"></p>
 
 ## Essayer l'application (Mac)
 
@@ -28,6 +28,17 @@ J2 : une boucle jouable dans une application Standalone (Mac et Windows) : enreg
 4. Si un bandeau indique que l'entrée est coupée pour éviter le larsen, cliquer dessus pour la réactiver.
 
 Utilisation : **espace** (ou le gros bouton) enregistre, ferme la prise, lance un overdub, le ferme. **S** arrête, **Z / Y** annulent ou rétablissent une couche, **C** efface. Les départs et fins de prise tombent sur la mesure ; un appui jusqu'à 80 ms après la barre de mesure est recadré dessus (réglable). La latence se règle à la main pour l'instant (environ : taille de buffer × 2 ÷ fréquence, plus quelques ms) ; la calibration automatique arrive en J7.
+
+### Pédalier MIDI
+
+Bouton **MIDI** en haut : une ligne par action (principal, stop, play, undo, redo, effacer, transport, métronome), une colonne par geste (appui court, appui long, double appui). Cliquer une case puis appuyer sur la pédale : c'est appris. N'importe quel pédalier convient (Note, CC ou Program Change, sur n'importe quel canal) ; l'app active d'elle-même les entrées MIDI branchées.
+
+- Une pédale peut porter trois actions : court, long (tenue 500 ms) et double (deux appuis en 300 ms). Durées réglables en bas du panneau. Une pédale sans geste long ni double réagit dès l'appui ; sinon il faut attendre de savoir quel geste c'est, mais la quantification part toujours de l'instant où le pied a appuyé.
+- Pédale « à bascule » (qui envoie 127 puis 0 à chaque appui au lieu de 127 à l'appui et 0 au relâchement) : clic sur la case, « Pédale à bascule ». Les Program Change le sont d'office.
+- **Effacer** au pied demande deux appuis en moins de 2 s (le bandeau du bas le rappelle).
+- Les affectations et réglages sont gardés d'une session à l'autre.
+
+<p align="center"><img src="docs/images/interface-j3-midi.png" alt="Panneau MIDI" width="640"></p>
 
 ## Compiler et tester
 
@@ -50,7 +61,7 @@ cmake --build build -j
 
 Sur Mac, ajouter `-DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"` pour un binaire universel. Sous Linux, JUCE demande `libasound2-dev libfreetype-dev libfontconfig1-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxext-dev`.
 
-Capture de l'interface sans carte son (développement) : option `-DBOOHCLEUR_BUILD_SCREENSHOT=ON`, puis `boohcleur-screenshot sortie.png overdub` (scénarios : `overdub`, `armed`, `recording`, `empty`).
+Capture de l'interface sans carte son (développement) : option `-DBOOHCLEUR_BUILD_SCREENSHOT=ON`, puis `boohcleur-screenshot sortie.png overdub` (scénarios : `overdub`, `armed`, `recording`, `empty`, `midi`).
 
 ## Organisation
 

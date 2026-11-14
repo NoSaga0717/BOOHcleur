@@ -15,6 +15,7 @@ add_executable(boohcleur-tests
 	TransportClockTests.cpp
 	InputRingBufferTests.cpp
 	EngineTests.cpp
+	MidiControlTests.cpp
 )
 target_link_libraries(boohcleur-tests PRIVATE boohcleur::core Catch2::Catch2WithMain)
 
