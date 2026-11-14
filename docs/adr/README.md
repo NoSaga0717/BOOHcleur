@@ -7,3 +7,4 @@ Pour changer une décision acceptée, écrire un nouvel ADR qui la remplace et m
 | N° | Sujet | Statut |
 | --- | --- | --- |
 | [0001](0001-architecture.md) | Architecture générale, licence, jalons | Accepté |
+| [0002](0002-application-android-de-test.md) | Application Android de test | Accepté |

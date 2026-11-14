@@ -13,6 +13,7 @@ J2 : une boucle jouable dans une application Standalone (Mac et Windows) : enreg
 | [`docs/cahier-des-charges.md`](docs/cahier-des-charges.md) | Cahier des charges de référence (V1 à V4) |
 | [`docs/adr/`](docs/adr/README.md) | Décisions d'architecture (ADR), une par fichier |
 | [`AGENTS.md`](AGENTS.md) | Règles pour les IA qui travaillent sur le dépôt |
+| [`android/README.md`](android/README.md) | APK Android de test (micro du téléphone) : installation et limites |
 
 <p align="center"><img src="docs/images/interface-j2.png" alt="Interface J2" width="640"></p>
 
