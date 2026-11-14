@@ -34,6 +34,7 @@ void BoohcleurProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 
 	if (engine_.prepare(config))
 	{
+
 		setLatencyMilliseconds(latencyMs_.load());
 		prepared_.store(true);
 	}
@@ -127,6 +128,8 @@ namespace
 		case ControlAction::TrackClear: return "clear";
 		case ControlAction::TransportToggle: return "transport";
 		case ControlAction::MetronomeToggle: return "metronome";
+		case ControlAction::SelectNext: return "selectNext";
+		case ControlAction::SelectPrevious: return "selectPrevious";
 		case ControlAction::None:
 		case ControlAction::Count: break;
 		}
@@ -147,7 +150,7 @@ namespace
 void BoohcleurProcessor::getStateInformation(juce::MemoryBlock& data)
 {
 	juce::XmlElement root("BOOHcleur");
-	root.setAttribute("version", 1);
+	root.setAttribute("version", 2);
 
 	auto& engine = engine_;
 	auto* settings = root.createNewChildElement("Settings");
@@ -158,6 +161,19 @@ void BoohcleurProcessor::getStateInformation(juce::MemoryBlock& data)
 	settings->setAttribute("metronome", engine.metronomeEnabled());
 	settings->setAttribute("monitor", engine.monitorEnabled());
 	settings->setAttribute("input", static_cast<int>(engine.inputMode()));
+	settings->setAttribute("tracks", engine.activeTracks());
+	settings->setAttribute("selected", engine.selectedTrack());
+	settings->setAttribute("master", static_cast<double>(engine.masterVolume()));
+
+	auto* mixer = root.createNewChildElement("Mixer");
+
+	for (int t = 0; t < boohcleur::EngineConfig {}.maxTracks; ++t)
+	{
+		auto* e = mixer->createNewChildElement("Loop");
+		e->setAttribute("index", t);
+		e->setAttribute("volume", static_cast<double>(engine.trackVolume(t)));
+		e->setAttribute("muted", engine.trackMuted(t));
+	}
 
 	const auto control = engine.midiControl().snapshot();
 	auto* midi = root.createNewChildElement("Midi");
@@ -175,7 +191,7 @@ void BoohcleurProcessor::getStateInformation(juce::MemoryBlock& data)
 		e->setAttribute("mode", static_cast<int>(b.mode));
 		e->setAttribute("gesture", static_cast<int>(b.gesture));
 		e->setAttribute("action", actionId(b.action));
-		e->setAttribute("track", b.track);
+		e->setAttribute("track", b.track == boohcleur::selectedTrack ? -1 : static_cast<int>(b.track));	// -1 : boucle sélectionnée
 	}
 
 	copyXmlToBinary(root, data);
@@ -198,10 +214,25 @@ void BoohcleurProcessor::setStateInformation(const void* data, int size)
 		engine_.setMetronomeEnabled(s->getBoolAttribute("metronome", true));
 		engine_.setMonitorEnabled(s->getBoolAttribute("monitor", false));
 		engine_.setInputMode(static_cast<boohcleur::InputMode>(juce::jlimit(0, 2, s->getIntAttribute("input", 0))));
+		engine_.setMasterVolume(static_cast<float>(juce::jlimit(0.0, 1.5, s->getDoubleAttribute("master", 1.0))));
+		engine_.setActiveTracks(s->getIntAttribute("tracks", 6));
+		engine_.setSelectedTrack(s->getIntAttribute("selected", 0));
 
 		if (prepared_.load())
 			engine_.post({ boohcleur::CommandType::SetTempo, 0, savedBpm_.load() });	// pris si transport arrêté
 	}
+
+	if (const auto* mixer = root->getChildByName("Mixer"))
+	{
+		for (const auto* e : mixer->getChildWithTagNameIterator("Loop"))
+		{
+			const int t = e->getIntAttribute("index", -1);
+			engine_.setTrackVolume(t, static_cast<float>(juce::jlimit(0.0, 1.5, e->getDoubleAttribute("volume", 1.0))));
+			engine_.setTrackMuted(t, e->getBoolAttribute("muted", false));
+		}
+	}
+
+	const int version = root->getIntAttribute("version", 1);
 
 	if (const auto* m = root->getChildByName("Midi"))
 	{
@@ -225,7 +256,9 @@ void BoohcleurProcessor::setStateInformation(const void* data, int size)
 			b.mode = static_cast<boohcleur::PressMode>(juce::jlimit(0, 1, e->getIntAttribute("mode")));
 			b.gesture = static_cast<boohcleur::Gesture>(juce::jlimit(0, 2, e->getIntAttribute("gesture")));
 			b.action = actionFromId(e->getStringAttribute("action"));
-			b.track = static_cast<std::uint8_t>(juce::jlimit(0, 15, e->getIntAttribute("track")));
+			// Version 1 (J3, une seule boucle) : pas de piste enregistrée = boucle sélectionnée.
+			const int track = version < 2 ? -1 : e->getIntAttribute("track", -1);
+			b.track = track < 0 || track >= boohcleur::Engine::maxTrackCount ? boohcleur::selectedTrack : static_cast<std::uint8_t>(track);
 
 			request.type = boohcleur::ControlRequest::Type::AddBinding;
 			request.binding = b;

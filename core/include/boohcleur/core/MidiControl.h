@@ -36,7 +36,8 @@ namespace boohcleur
 
 	enum class Gesture : std::uint8_t { Short, Long, Double };
 
-	// Actions assignables (J3 : une boucle ; le numéro de piste est déjà prévu).
+	// Actions assignables. Les actions de boucle visent une boucle précise ou,
+	// avec track = selectedTrack, la boucle sélectionnée.
 	enum class ControlAction : std::uint8_t
 	{
 		None,
@@ -48,8 +49,12 @@ namespace boohcleur
 		TrackClear,			// demande une confirmation : deux déclenchements en 2 s
 		TransportToggle,
 		MetronomeToggle,
+		SelectNext,			// boucle sélectionnée suivante / précédente
+		SelectPrevious,
 		Count
 	};
+
+	inline constexpr std::uint8_t selectedTrack = 0xFF;
 
 	struct Binding
 	{
@@ -57,7 +62,7 @@ namespace boohcleur
 		PressMode mode = PressMode::Momentary;
 		Gesture gesture = Gesture::Short;
 		ControlAction action = ControlAction::None;
-		std::uint8_t track = 0;
+		std::uint8_t track = selectedTrack;
 
 		friend constexpr bool operator==(const Binding&, const Binding&) = default;
 	};
