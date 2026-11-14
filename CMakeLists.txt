@@ -8,6 +8,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(BOOHCLEUR_BUILD_TESTS "Compiler les tests" ON)
 option(BOOHCLEUR_BUILD_APP "Compiler l'application JUCE (Standalone)" OFF)
+option(BOOHCLEUR_BUILD_MOBILE "Compiler l'application mobile de test (Android via Gradle, aperçu sur bureau)" OFF)
 
 # Avertissements stricts pour notre code seulement (pas pour les sources de JUCE).
 add_library(boohcleur-warnings INTERFACE)
@@ -29,6 +30,11 @@ add_subdirectory(core)
 
 if (BOOHCLEUR_BUILD_APP)
 	add_subdirectory(app)
+endif()
+
+# Construite par Gradle pour Android (voir android/README.md).
+if (BOOHCLEUR_BUILD_MOBILE)
+	add_subdirectory(android/native)
 endif()
 
 if (BOOHCLEUR_BUILD_TESTS)
