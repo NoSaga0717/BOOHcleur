@@ -24,7 +24,7 @@ J2 : une boucle jouable dans une application Standalone (Mac et Windows) : enreg
    xattr -dr com.apple.quarantine ~/Downloads/BOOHcleur.app
    ```
    (adapter le chemin), puis double-cliquer.
-3. Accepter l'accès au micro (c'est l'entrée de la carte son). Dans **Options > Audio/MIDI Settings**, choisir la carte son, l'entrée de la guitare et la taille de buffer.
+3. Accepter l'accès au micro (c'est l'entrée de la carte son). Dans **Options > Audio/MIDI Settings**, choisir la carte son et la taille de buffer. Dans l'app, **Entrée enregistrée** : « Mono · entrée 1 » (défaut) pour une guitare branchée sur l'entrée 1, jouée des deux côtés ; « Stéréo » pour un multi-effet stéréo.
 4. Si un bandeau indique que l'entrée est coupée pour éviter le larsen, cliquer dessus pour la réactiver.
 
 Utilisation : **espace** (ou le gros bouton) enregistre, ferme la prise, lance un overdub, le ferme. **S** arrête, **Z / Y** annulent ou rétablissent une couche, **C** efface. Les départs et fins de prise tombent sur la mesure ; un appui jusqu'à 80 ms après la barre de mesure est recadré dessus (réglable). La latence se règle à la main pour l'instant (environ : taille de buffer × 2 ÷ fréquence, plus quelques ms) ; la calibration automatique arrive en J7.

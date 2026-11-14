@@ -35,9 +35,9 @@ private:
 		redoButton_ { "REDO" }, clearButton_ { "CLEAR" }, transportButton_;
 
 	juce::Label positionLabel_, hintLabel_;
-	juce::Label tempoCaption_, quantizeCaption_, latencyCaption_, toleranceCaption_;
+	juce::Label tempoCaption_, quantizeCaption_, latencyCaption_, toleranceCaption_, inputCaption_;
 	juce::Slider tempoSlider_, latencySlider_, toleranceSlider_;
-	juce::ComboBox quantizeBox_;
+	juce::ComboBox quantizeBox_, inputBox_;
 	juce::ToggleButton metronomeToggle_, monitorToggle_;
 
 	int frame_ = 0;

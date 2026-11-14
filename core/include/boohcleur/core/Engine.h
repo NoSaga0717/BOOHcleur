@@ -13,6 +13,15 @@
 
 namespace boohcleur
 {
+	// Quel signal de la carte son est enregistré. Une guitare branchée sur une
+	// seule entrée doit être enregistrée en mono et jouée des deux côtés.
+	enum class InputMode : std::uint8_t
+	{
+		MonoInput1,		// entrée 1, dupliquée à gauche et à droite (défaut)
+		MonoInput2,		// entrée 2, dupliquée
+		Stereo			// entrées 1 et 2 en stéréo (multi-effet stéréo, clavier...)
+	};
+
 	struct EngineConfig
 	{
 		double sampleRate = 48000.0;
@@ -113,6 +122,8 @@ namespace boohcleur
 		GridDivision quantizeDivision() const noexcept { return static_cast<GridDivision>(division_.load()); }
 		void setMetronomeEnabled(bool enabled) noexcept { metronome_.store(enabled); }
 		bool metronomeEnabled() const noexcept { return metronome_.load(); }
+		void setInputMode(InputMode mode) noexcept { inputMode_.store(static_cast<int>(mode)); }
+		InputMode inputMode() const noexcept { return static_cast<InputMode>(inputMode_.load()); }
 		void setMonitorEnabled(bool enabled) noexcept { monitor_.store(enabled); }
 		bool monitorEnabled() const noexcept { return monitor_.load(); }
 
@@ -169,6 +180,7 @@ namespace boohcleur
 		std::atomic<int> division_ { static_cast<int>(GridDivision::Bar) };
 		std::atomic<bool> metronome_ { true };
 		std::atomic<bool> monitor_ { false };
+		std::atomic<int> inputMode_ { static_cast<int>(InputMode::MonoInput1) };
 
 		std::atomic<bool> transportPlaying_ { false };
 		std::atomic<std::int64_t> transportTick_ { 0 };

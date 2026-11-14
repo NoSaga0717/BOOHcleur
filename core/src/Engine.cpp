@@ -84,6 +84,28 @@ namespace boohcleur
 		if (tracks_.empty() || numFrames <= 0)
 			return;
 
+		// Sélection de l'entrée : en mono, un seul canal, que le tampon duplique.
+		const InputMode mode = static_cast<InputMode>(inputMode_.load(std::memory_order_relaxed));
+		const float* selected[2] = { nullptr, nullptr };
+		int numSelected = 0;
+
+		if (in != nullptr && numIn > 0)
+		{
+			if (mode == InputMode::Stereo && numIn >= 2)
+			{
+				selected[0] = in[0];
+				selected[1] = in[1];
+				numSelected = 2;
+			}
+			else
+			{
+				selected[0] = in[mode == InputMode::MonoInput2 && numIn >= 2 ? 1 : 0];
+				numSelected = 1;
+			}
+		}
+
+		in = selected;
+		numIn = numSelected;
 		ring_.write(in, numIn, numFrames);
 
 		for (int c = 0; c < numOut; ++c)

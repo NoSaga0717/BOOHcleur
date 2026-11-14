@@ -48,6 +48,7 @@ BoohcleurEditor::BoohcleurEditor(BoohcleurProcessor& processor)
 	quantizeCaption_.setText("Quantification", juce::dontSendNotification);
 	latencyCaption_.setText("Latence (ms)", juce::dontSendNotification);
 	toleranceCaption_.setText(fr("Tolérance (ms)"), juce::dontSendNotification);
+	inputCaption_.setText(fr("Entrée enregistrée"), juce::dontSendNotification);
 	metronomeToggle_.setButtonText(fr("Métronome"));
 	monitorToggle_.setButtonText(fr("Écoute de l'entrée"));
 
@@ -85,7 +86,7 @@ BoohcleurEditor::BoohcleurEditor(BoohcleurProcessor& processor)
 	hintLabel_.setJustificationType(juce::Justification::centred);
 	addAndMakeVisible(hintLabel_);
 
-	for (auto* caption : { &tempoCaption_, &quantizeCaption_, &latencyCaption_, &toleranceCaption_ })
+	for (auto* caption : { &tempoCaption_, &quantizeCaption_, &latencyCaption_, &toleranceCaption_, &inputCaption_ })
 	{
 		styleCaption(*caption);
 		addAndMakeVisible(*caption);
@@ -129,6 +130,17 @@ BoohcleurEditor::BoohcleurEditor(BoohcleurProcessor& processor)
 	};
 	quantizeBox_.setWantsKeyboardFocus(false);
 	addAndMakeVisible(quantizeBox_);
+
+	inputBox_.addItem(fr("Mono · entrée 1"), 1);
+	inputBox_.addItem(fr("Mono · entrée 2"), 2);
+	inputBox_.addItem(fr("Stéréo · entrées 1 et 2"), 3);
+	inputBox_.setSelectedId(static_cast<int>(engine.inputMode()) + 1, juce::dontSendNotification);
+	inputBox_.onChange = [this]
+	{
+		processor_.engine().setInputMode(static_cast<boohcleur::InputMode>(inputBox_.getSelectedId() - 1));
+	};
+	inputBox_.setWantsKeyboardFocus(false);
+	addAndMakeVisible(inputBox_);
 
 	metronomeToggle_.setToggleState(engine.metronomeEnabled(), juce::dontSendNotification);
 	metronomeToggle_.onClick = [this] { processor_.engine().setMetronomeEnabled(metronomeToggle_.getToggleState()); };
@@ -296,8 +308,9 @@ void BoohcleurEditor::resized()
 	toleranceSlider_.setBounds(middle.removeFromTop(28));
 
 	auto right = column(settings.getWidth());
-	right.removeFromTop(20);
-	metronomeToggle_.setBounds(right.removeFromTop(28));
-	right.removeFromTop(28);
-	monitorToggle_.setBounds(right.removeFromTop(28));
+	inputCaption_.setBounds(right.removeFromTop(20));
+	inputBox_.setBounds(right.removeFromTop(28));
+	right.removeFromTop(6);
+	metronomeToggle_.setBounds(right.removeFromTop(24));
+	monitorToggle_.setBounds(right.removeFromTop(24));
 }

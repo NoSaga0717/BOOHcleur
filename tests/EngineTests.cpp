@@ -301,3 +301,47 @@ TEST_CASE("Moteur : l'arret du transport abandonne la premiere prise")
 	CHECK(bench.engine.trackSnapshot(0).state == TrackState::Empty);
 	CHECK_FALSE(bench.engine.transportSnapshot().playing);
 }
+
+TEST_CASE("Moteur : guitare sur une seule entree, rejouee des deux cotes")
+{
+	auto runWith = [](InputMode mode, bool guitarOnLeft)
+	{
+		Engine engine;
+		EngineConfig config;
+		config.sampleRate = sampleRate;
+		config.maxBlockSize = blockSize;
+		REQUIRE(engine.prepare(config));
+		engine.setMetronomeEnabled(false);
+		engine.setInputMode(mode);
+
+		std::vector<float> inL(blockSize), inR(blockSize), outL(blockSize), outR(blockSize);
+		std::vector<float> left, right;
+
+		for (std::int64_t block = 0; block * blockSize < 3 * bar; ++block)
+		{
+			if (block == 0 || block == Bench::blockOf(bar))
+				REQUIRE(engine.post({ CommandType::TrackMain, 0, 0.0 }));
+
+			for (int i = 0; i < blockSize; ++i)
+			{
+				const float value = block * blockSize + i == 1000 ? 1.0f : 0.0f;
+				inL[i] = guitarOnLeft ? value : 0.0f;
+				inR[i] = guitarOnLeft ? 0.0f : value;
+			}
+
+			const float* in[2] = { inL.data(), inR.data() };
+			float* out[2] = { outL.data(), outR.data() };
+			engine.process(in, 2, out, 2, blockSize);
+			left.insert(left.end(), outL.begin(), outL.end());
+			right.insert(right.end(), outR.begin(), outR.end());
+		}
+
+		const auto at = static_cast<std::size_t>(bar + 1000);
+		return std::pair { left[at], right[at] };
+	};
+
+	CHECK(runWith(InputMode::MonoInput1, true) == std::pair { 1.0f, 1.0f });	// défaut : des deux côtés
+	CHECK(runWith(InputMode::MonoInput2, false) == std::pair { 1.0f, 1.0f });
+	CHECK(runWith(InputMode::MonoInput2, true) == std::pair { 0.0f, 0.0f });
+	CHECK(runWith(InputMode::Stereo, true) == std::pair { 1.0f, 0.0f });
+}
