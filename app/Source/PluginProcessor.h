@@ -42,6 +42,12 @@ public:
 	boohcleur::Engine& engine() noexcept { return engine_; }
 	bool isPrepared() const noexcept { return prepared_.load(); }
 
+	// Diagnostic (appli mobile) : blocs audio traités, et pourquoi le moteur
+	// n'a pas pu démarrer le cas échéant.
+	std::uint64_t blocksProcessed() const noexcept { return blocks_.load(std::memory_order_relaxed); }
+	enum class PrepareError { None, InvalidConfig, OutOfMemory };
+	PrepareError prepareError() const noexcept { return prepareError_.load(); }
+
 	// Décalage de latence en millisecondes (réglé à la main en J2, calibré en J7).
 	void setLatencyMilliseconds(double ms);
 	double latencyMilliseconds() const noexcept { return latencyMs_.load(); }
@@ -50,6 +56,8 @@ private:
 	boohcleur::Engine engine_;
 	std::vector<std::vector<float>> inputCopy_;
 	std::atomic<bool> prepared_ { false };
+	std::atomic<std::uint64_t> blocks_ { 0 };
+	std::atomic<PrepareError> prepareError_ { PrepareError::None };
 	std::atomic<double> latencyMs_ { 0.0 };
 	std::atomic<double> sampleRate_ { 48000.0 };
 	std::atomic<double> savedBpm_ { 120.0 };

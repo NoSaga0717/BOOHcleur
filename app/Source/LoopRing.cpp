@@ -53,6 +53,12 @@ namespace boohcleur::ui
 			onTap();
 	}
 
+	void LoopRing::Model::read(const Engine& engine, int index)
+	{
+		track = engine.trackSnapshot(index);
+		waveformBins = engine.waveform(index, waveform.data(), maxWaveformBins);
+	}
+
 	void LoopRing::setModel(const Model& model)
 	{
 		model_ = model;
@@ -104,6 +110,39 @@ namespace boohcleur::ui
 			g.strokePath(arc, juce::PathStrokeType(thickness, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 		}
 
+		// Forme d'onde, à l'intérieur de l'anneau, comme une piste circulaire :
+		// chaque tranche est un trait radial centré sur une ligne de base.
+		if (model_.waveformBins > 1)
+		{
+			const int bins = model_.waveformBins;
+			const float base = radius * 0.74f;
+			const float depth = radius * 0.17f;
+			const auto colour = track.state == TrackState::Empty ? colours::textDim : stateColour;
+			const double playAngle = progress * juce::MathConstants<double>::twoPi;
+			const float strokeWidth = juce::jlimit(1.0f, 3.0f, juce::MathConstants<float>::twoPi * base / static_cast<float>(bins) * 0.7f);
+
+			for (int b = 0; b < bins; ++b)
+			{
+				// Racine : les attaques douces restent visibles.
+				const float value = std::sqrt(model_.waveform[static_cast<std::size_t>(b)]);
+
+				if (value < 0.01f)
+					continue;
+
+				const float angle = juce::MathConstants<float>::twoPi * (static_cast<float>(b) + 0.5f) / static_cast<float>(bins);
+
+				// Ce qui vient d'être joué est plus vif que ce qui va venir.
+				const double behind = std::fmod(playAngle - angle + 2.0 * juce::MathConstants<double>::twoPi,
+					juce::MathConstants<double>::twoPi);
+				const float alpha = 0.35f + 0.55f * static_cast<float>(1.0 - behind / juce::MathConstants<double>::twoPi);
+
+				const float half = juce::jmax(0.75f, value * depth);
+				g.setColour(colour.withAlpha(alpha));
+				g.drawLine({ centre.getPointOnCircumference(base - half, angle), centre.getPointOnCircumference(base + half, angle) },
+					strokeWidth);
+			}
+		}
+
 		// Repères de mesure
 		if (bars > 1 && bars <= 64)
 		{
@@ -135,7 +174,8 @@ namespace boohcleur::ui
 		}
 
 		// Texte central
-		auto text = getLocalBounds().toFloat().withSizeKeepingCentre(radius * 1.5f, radius * 1.1f);
+		// Le texte tient dans le disque laissé libre par la forme d'onde.
+		auto text = getLocalBounds().toFloat().withSizeKeepingCentre(radius * (model_.waveformBins > 1 ? 1.1f : 1.5f), radius * 1.1f);
 
 		g.setColour(track.state == TrackState::Empty ? colours::textDim : stateColour);
 		g.setFont(juce::Font(juce::FontOptions(juce::jmax(14.0f, size * 0.13f), juce::Font::bold)));

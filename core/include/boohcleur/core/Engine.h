@@ -139,6 +139,12 @@ namespace boohcleur
 		TrackSnapshot trackSnapshot(int track) const noexcept;
 		TransportSnapshot transportSnapshot() const noexcept;
 		MemorySnapshot memorySnapshot() const noexcept;
+
+		// Forme d'onde d'une boucle repliée sur un tour, pour l'affichage :
+		// out[0..n) entre 0 et 1, n rendu (au plus maxBins, moins pour une boucle
+		// courte). Pendant la première prise, un tour = une mesure. Couches
+		// annulées exclues. N'importe quel thread, sans verrou.
+		int waveform(int track, float* out, int maxBins) const noexcept;
 		int numTracks() const noexcept { return static_cast<int>(tracks_.size()); }
 
 		// Boucles utilisées (1 à numTracks) : les suivantes sont muettes et ignorées.

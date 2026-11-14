@@ -5,6 +5,8 @@
 #include "boohcleur/core/TransportClock.h"
 
 #include <array>
+#include <atomic>
+#include <memory>
 #include <cstdint>
 #include <vector>
 
@@ -107,6 +109,16 @@ namespace boohcleur
 		// Recopie dans les couches tout ce qui est disponible dans le tampon.
 		void capture(const TempoMap& tempoMap, const InputRingBuffer& ring) noexcept;
 
+		// --- Aperçu pour l'interface (lisible depuis n'importe quel thread) ---
+
+		// Crête de chaque tranche de peakHop échantillons, par couche, tenue à
+		// jour pendant la capture. Lecture sans verrou : un aperçu, pas l'audio.
+		static constexpr int peakHop = 512;
+		int maxLayers() const noexcept { return config_.maxLayers; }
+		SamplePos publishedStart(int layer) const noexcept;
+		SamplePos publishedCount(int layer) const noexcept;
+		float peak(int layer, std::size_t bin) const noexcept;
+
 	private:
 		struct Layer
 		{
@@ -140,8 +152,20 @@ namespace boohcleur
 		float read(const Layer& layer, int c, SamplePos index) const noexcept;
 		float& sample(Layer& layer, int c, SamplePos index) noexcept;
 
+		void notePeak(int layer, SamplePos index, float value) noexcept;
+		void publishLayers() noexcept;
+
+		struct PublishedLayer
+		{
+			std::atomic<SamplePos> start { 0 };
+			std::atomic<SamplePos> count { 0 };
+		};
+
 		TrackConfig config_;
 		SamplePool* pool_ = nullptr;
+		std::unique_ptr<std::atomic<float>[]> peaks_;		// [couche][tranche]
+		std::size_t peakBins_ = 0;
+		std::unique_ptr<PublishedLayer[]> published_;
 		std::vector<Layer> layers_;
 		std::vector<std::vector<float>> preRoll_;	// son juste avant le début de la prise
 		std::array<Capture, maxCaptures> captures_ {};

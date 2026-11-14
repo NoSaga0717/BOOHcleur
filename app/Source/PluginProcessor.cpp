@@ -14,8 +14,10 @@ bool BoohcleurProcessor::isBusesLayoutSupported(const BusesLayout& layouts) cons
 	const auto in = layouts.getMainInputChannelSet();
 	const auto out = layouts.getMainOutputChannelSet();
 
+	// Entrée coupée acceptée : sans micro (refusé sur téléphone), le looper doit
+	// quand même tourner (transport, métronome, commandes).
 	return out == juce::AudioChannelSet::stereo()
-		&& (in == juce::AudioChannelSet::mono() || in == juce::AudioChannelSet::stereo());
+		&& (in == juce::AudioChannelSet::mono() || in == juce::AudioChannelSet::stereo() || in.isDisabled());
 }
 
 void BoohcleurProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
@@ -32,9 +34,25 @@ void BoohcleurProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 	inputCopy_.assign(2, std::vector<float>(static_cast<size_t>(maxBlock_), 0.0f));
 	sampleRate_.store(sampleRate);
 
-	if (engine_.prepare(config))
-	{
+#if JUCE_ANDROID || JUCE_IOS
+	// Téléphone : réserve plus modeste (environ 5 min 50 s de son au total).
+	config.memoryBudgetBytes = std::size_t { 128 } << 20;
+#endif
 
+	bool ok = false;
+
+	try
+	{
+		ok = engine_.prepare(config);
+		prepareError_.store(ok ? PrepareError::None : PrepareError::InvalidConfig);
+	}
+	catch (const std::bad_alloc&)
+	{
+		prepareError_.store(PrepareError::OutOfMemory);
+	}
+
+	if (ok)
+	{
 		setLatencyMilliseconds(latencyMs_.load());
 		prepared_.store(true);
 	}
@@ -49,6 +67,7 @@ void BoohcleurProcessor::setLatencyMilliseconds(double ms)
 void BoohcleurProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
 {
 	juce::ScopedNoDenormals noDenormals;
+	blocks_.fetch_add(1, std::memory_order_relaxed);
 	if (!prepared_.load())
 	{
 		buffer.clear();

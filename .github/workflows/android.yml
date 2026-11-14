@@ -109,3 +109,5 @@ jobs:
           path: |
             logcat.txt
             smoke-screen.png
+            logcat-rec.txt
+            smoke-rec.png
