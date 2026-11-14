@@ -2,6 +2,8 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include <functional>
+
 #include "boohcleur/core/Engine.h"
 
 namespace boohcleur::ui
@@ -43,10 +45,14 @@ namespace boohcleur::ui
 			TransportSnapshot transport;
 			double sampleRate = 48000.0;
 			bool blink = false;
+			bool compact = false;	// petit anneau de la grille de boucles
 		};
 
 		void setModel(const Model& model);
 		void paint(juce::Graphics& g) override;
+		void mouseUp(const juce::MouseEvent& event) override;
+
+		std::function<void()> onTap;	// clic sur l'anneau
 
 	private:
 		Model model_;

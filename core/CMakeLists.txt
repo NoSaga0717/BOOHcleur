@@ -5,6 +5,7 @@ add_library(boohcleur-core
 	src/Grid.cpp
 	src/TransportClock.cpp
 	src/InputRingBuffer.cpp
+	src/SamplePool.cpp
 	src/LoopTrack.cpp
 	src/MidiControl.cpp
 	src/Engine.cpp

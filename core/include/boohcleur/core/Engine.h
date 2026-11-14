@@ -4,10 +4,13 @@
 #include "boohcleur/core/InputRingBuffer.h"
 #include "boohcleur/core/LoopTrack.h"
 #include "boohcleur/core/MidiControl.h"
+#include "boohcleur/core/SamplePool.h"
 #include "boohcleur/core/SpscQueue.h"
 #include "boohcleur/core/TransportClock.h"
 
+#include <array>
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -28,10 +31,13 @@ namespace boohcleur
 		double sampleRate = 48000.0;
 		int maxBlockSize = 512;
 		int numChannels = 2;
-		int numTracks = 1;				// boucles créées (ADR D10 : 6 par défaut à partir de J4)
+		int numTracks = 6;				// boucles créées (ADR D10)
 		int maxTracks = 6;				// plafond logiciel de la cible
-		double maxLoopSeconds = 60.0;	// provisoire, budget mémoire à chiffrer en J4
-		int maxLayersPerTrack = 8;
+		double maxLoopSeconds = 300.0;	// longueur maximale d'une boucle
+		int maxLayersPerTrack = 16;		// couches par boucle (profondeur d'undo)
+		// Mémoire audio partagée par toutes les boucles. 512 Mo = 23 min de son
+		// stéréo à 48 kHz au total, toutes boucles et couches confondues.
+		std::size_t memoryBudgetBytes = std::size_t { 512 } << 20;
 		double ringSeconds = 2.0;		// tampon circulaire d'entrée
 		double fadeMilliseconds = 5.0;
 		double bpm = 120.0;
@@ -81,6 +87,14 @@ namespace boohcleur
 		SamplePos position = 0;			// position dans la boucle
 		SamplePos recorded = 0;			// pendant la première prise : durée enregistrée
 		Tick pendingTarget = 0;
+		bool pendingAutomatic = false;	// fermeture prévue à la longueur maximale seulement
+	};
+
+	struct MemorySnapshot
+	{
+		std::size_t usedBytes = 0;
+		std::size_t totalBytes = 0;
+		double secondsLeft = 0.0;		// son stéréo encore enregistrable
 	};
 
 	struct TransportSnapshot
@@ -101,6 +115,8 @@ namespace boohcleur
 	class Engine
 	{
 	public:
+		static constexpr int maxTrackCount = 16;	// plafond absolu (EngineConfig::maxTracks)
+
 		Engine();
 		~Engine();
 
@@ -122,7 +138,24 @@ namespace boohcleur
 
 		TrackSnapshot trackSnapshot(int track) const noexcept;
 		TransportSnapshot transportSnapshot() const noexcept;
+		MemorySnapshot memorySnapshot() const noexcept;
 		int numTracks() const noexcept { return static_cast<int>(tracks_.size()); }
+
+		// Boucles utilisées (1 à numTracks) : les suivantes sont muettes et ignorées.
+		void setActiveTracks(int count) noexcept;
+		int activeTracks() const noexcept { return activeTracks_.load(); }
+
+		// Boucle visée par les commandes « boucle sélectionnée » du pédalier.
+		void setSelectedTrack(int track) noexcept;
+		int selectedTrack() const noexcept { return selected_.load(); }
+
+		// Mixeur (gains linéaires, lissés sur le thread audio).
+		void setTrackVolume(int track, float gain) noexcept;
+		float trackVolume(int track) const noexcept;
+		void setTrackMuted(int track, bool muted) noexcept;
+		bool trackMuted(int track) const noexcept;
+		void setMasterVolume(float gain) noexcept { master_.store(gain); }
+		float masterVolume() const noexcept { return master_.load(); }
 
 		// Réglages modifiables pendant le jeu.
 		void setLatencySamples(int samples) noexcept { latencySamples_.store(samples); }
@@ -143,6 +176,7 @@ namespace boohcleur
 		{
 			PendingAction action = PendingAction::None;
 			Tick target = 0;
+			bool automatic = false;	// fermeture à la longueur maximale, pas demandée
 		};
 
 		struct SharedTrackState
@@ -155,6 +189,15 @@ namespace boohcleur
 			std::atomic<std::int64_t> position { 0 };
 			std::atomic<std::int64_t> recorded { 0 };
 			std::atomic<std::int64_t> pendingTarget { 0 };
+			std::atomic<bool> pendingAutomatic { false };
+		};
+
+		// Réglages du mixeur : hors de prepare(), l'interface peut les poser avant
+		// le démarrage de l'audio (réglages restaurés).
+		struct MixerSettings
+		{
+			std::atomic<float> volume { 1.0f };
+			std::atomic<bool> muted { false };
 		};
 
 		void handleCommand(const Command& command, SamplePos blockStart) noexcept;
@@ -163,6 +206,7 @@ namespace boohcleur
 		void schedule(int index, PendingAction action, Tick pressTick, SamplePos blockStart) noexcept;
 		void execute(int index, const Pending& pending, SamplePos at) noexcept;
 		std::int64_t musicalToDevice() const noexcept;
+		void renderTracks(SamplePos at, int numFrames, float* const* out, int numOut) noexcept;
 		void renderMetronome(SamplePos blockStart, int numFrames, float* const* out, int numOut) noexcept;
 		void publish(SamplePos blockStart) noexcept;
 
@@ -173,7 +217,10 @@ namespace boohcleur
 		std::vector<LoopTrack> tracks_;
 		std::vector<Pending> pending_;
 		std::unique_ptr<SharedTrackState[]> shared_;
-		std::vector<std::vector<float>> scratch_;
+		std::vector<std::vector<float>> scratch_;	// rendu d'une boucle avant mixage
+		std::vector<float> mixGain_;				// gain lissé de chaque boucle
+		float masterGain_ = 1.0f;
+		SamplePool pool_;
 
 		SpscQueue<Command, 256> commands_;
 		MidiControl midi_;
@@ -194,6 +241,12 @@ namespace boohcleur
 		std::atomic<bool> metronome_ { true };
 		std::atomic<bool> monitor_ { false };
 		std::atomic<int> inputMode_ { static_cast<int>(InputMode::MonoInput1) };
+
+		std::array<MixerSettings, maxTrackCount> mixer_ {};
+		std::atomic<int> activeTracks_ { 6 };
+		std::atomic<int> selected_ { 0 };
+		std::atomic<float> master_ { 1.0f };
+		std::atomic<int> usedChunks_ { 0 };
 
 		std::atomic<bool> transportPlaying_ { false };
 		std::atomic<std::int64_t> transportTick_ { 0 };

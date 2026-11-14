@@ -1,6 +1,7 @@
 #pragma once
 
 #include "boohcleur/core/InputRingBuffer.h"
+#include "boohcleur/core/SamplePool.h"
 #include "boohcleur/core/TransportClock.h"
 
 #include <array>
@@ -22,7 +23,7 @@ namespace boohcleur
 
 	struct TrackConfig
 	{
-		int numChannels = 2;
+		int numChannels = 2;			// doit être celui de la réserve
 		SamplePos maxLoopSamples = 0;	// longueur maximale d'une boucle
 		int maxLayers = 8;				// couches par piste (undo compris)
 		int fadeSamples = 240;			// fondus anti-clic
@@ -31,6 +32,9 @@ namespace boohcleur
 	// Une piste : une boucle, ses couches non destructives et leur capture.
 	//
 	// Toutes les méthodes sauf prepare() sont temps réel : aucune allocation.
+	// Le son des couches vit dans une réserve partagée (SamplePool) : une couche
+	// ne prend que la mémoire de ce qu'elle a enregistré. Réserve vide : la
+	// suite de la couche reste muette, rien ne casse.
 	//
 	// Couches :
 	// - la couche 0 est la première prise, sur toute la longueur de la boucle ;
@@ -45,7 +49,7 @@ namespace boohcleur
 	class LoopTrack
 	{
 	public:
-		void prepare(const TrackConfig& config);
+		void prepare(const TrackConfig& config, SamplePool& pool);
 
 		TrackState state() const noexcept { return state_; }
 		bool hasContent() const noexcept { return numLayers_ > 0 && hasSpan_; }
@@ -106,7 +110,7 @@ namespace boohcleur
 	private:
 		struct Layer
 		{
-			std::vector<std::vector<float>> data;	// [canal][index]
+			std::vector<int> chunks;				// blocs de la réserve, -1 si pas encore pris
 			SamplePos startOffset = 0;				// position dans la boucle du premier échantillon
 			SamplePos count = 0;					// échantillons valides
 			float gain = 0.0f;						// gain lissé courant
@@ -131,8 +135,13 @@ namespace boohcleur
 		void captureOverdub(Capture& capture, const TempoMap& tempoMap, const InputRingBuffer& ring) noexcept;
 		void finishFirstLayer(const Capture& capture) noexcept;
 		void resetContent() noexcept;
+		void releaseLayer(Layer& layer) noexcept;
+		bool ensure(Layer& layer, SamplePos index) noexcept;
+		float read(const Layer& layer, int c, SamplePos index) const noexcept;
+		float& sample(Layer& layer, int c, SamplePos index) noexcept;
 
 		TrackConfig config_;
+		SamplePool* pool_ = nullptr;
 		std::vector<Layer> layers_;
 		std::vector<std::vector<float>> preRoll_;	// son juste avant le début de la prise
 		std::array<Capture, maxCaptures> captures_ {};

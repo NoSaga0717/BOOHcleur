@@ -23,7 +23,7 @@ namespace boohcleur
 		const auto map = TempoMap::create(config.sampleRate, config.bpm, config.signature);
 
 		if (!map || config.maxBlockSize < 1 || config.numChannels < 1 || config.numChannels > 2
-			|| config.maxTracks < 1 || config.numTracks < 1 || config.numTracks > config.maxTracks
+			|| config.maxTracks < 1 || config.maxTracks > maxTrackCount || config.numTracks < 1 || config.numTracks > config.maxTracks
 			|| config.maxLayersPerTrack < 1 || config.maxLoopSeconds <= 0.0 || config.ringSeconds <= 0.0)
 			return false;
 
@@ -35,6 +35,9 @@ namespace boohcleur
 		const auto ringFrames = static_cast<std::int64_t>(config.ringSeconds * config.sampleRate) + config.maxBlockSize;
 		ring_.prepare(config.numChannels, ringFrames);
 
+		if (!pool_.prepare(config.numChannels, config.memoryBudgetBytes))
+			return false;
+
 		TrackConfig trackConfig;
 		trackConfig.numChannels = config.numChannels;
 		trackConfig.maxLoopSamples = static_cast<SamplePos>(config.maxLoopSeconds * config.sampleRate);
@@ -45,10 +48,18 @@ namespace boohcleur
 		tracks_.resize(static_cast<std::size_t>(config.numTracks));
 
 		for (auto& track : tracks_)
-			track.prepare(trackConfig);
+			track.prepare(trackConfig, pool_);
+
+		scratch_.assign(static_cast<std::size_t>(config.numChannels),
+			std::vector<float>(static_cast<std::size_t>(config.maxBlockSize), 0.0f));
+		mixGain_.assign(static_cast<std::size_t>(config.numTracks), 0.0f);
+		masterGain_ = master_.load();
+		usedChunks_.store(0);
 
 		pending_.assign(static_cast<std::size_t>(config.numTracks), Pending {});
 		shared_ = std::make_unique<SharedTrackState[]>(static_cast<std::size_t>(config.numTracks));
+		activeTracks_.store(std::clamp(activeTracks_.load(), 1, config.numTracks));
+		selected_.store(std::clamp(selected_.load(), 0, config.numTracks - 1));
 
 		while (commands_.pop())
 		{
@@ -167,9 +178,7 @@ namespace boohcleur
 				if (next > cursor)
 				{
 					float* segment[2] = { out[0] + cursor, out[std::min(1, numOut - 1)] + cursor };
-
-					for (auto& track : tracks_)
-						track.render(tempoMap_, blockStart + cursor, next - cursor, segment);
+					renderTracks(blockStart + cursor, next - cursor, segment, numOut);
 				}
 
 				cursor = next;
@@ -201,6 +210,20 @@ namespace boohcleur
 			}
 		}
 
+		// Volume général, lissé.
+		{
+			const float target = master_.load(std::memory_order_relaxed);
+			const float step = 1.0f / static_cast<float>(std::max(1, static_cast<int>(config_.fadeMilliseconds * 0.001 * config_.sampleRate)));
+
+			for (int i = 0; i < numFrames; ++i)
+			{
+				masterGain_ += std::clamp(target - masterGain_, -step, step);
+
+				for (int c = 0; c < numOut; ++c)
+					out[c][i] *= masterGain_;
+			}
+		}
+
 		publish(blockStart);
 
 		deviceSample_ += numFrames;
@@ -216,8 +239,22 @@ namespace boohcleur
 	void Engine::handleTrigger(const Trigger& trigger, SamplePos blockStart) noexcept
 	{
 		Command command;
-		command.track = trigger.track;
 		command.pressDevice = trigger.pressDevice;
+
+		const int active = activeTracks_.load(std::memory_order_relaxed);
+
+		if (trigger.track == boohcleur::selectedTrack)
+		{
+			command.track = selected_.load(std::memory_order_relaxed);
+		}
+		else
+		{
+			command.track = trigger.track;
+
+			// Une pédale dédiée à une boucle la sélectionne aussi.
+			if (command.track < active)
+				selected_.store(command.track, std::memory_order_relaxed);
+		}
 
 		switch (trigger.action)
 		{
@@ -234,6 +271,14 @@ namespace boohcleur
 
 		case ControlAction::MetronomeToggle:
 			metronome_.store(!metronome_.load(std::memory_order_relaxed), std::memory_order_relaxed);
+			return;
+
+		case ControlAction::SelectNext:
+			selected_.store((selected_.load(std::memory_order_relaxed) + 1) % active, std::memory_order_relaxed);
+			return;
+
+		case ControlAction::SelectPrevious:
+			selected_.store((selected_.load(std::memory_order_relaxed) + active - 1) % active, std::memory_order_relaxed);
 			return;
 
 		case ControlAction::None:
@@ -256,7 +301,7 @@ namespace boohcleur
 			pressSample = std::max<SamplePos>(0, command.pressDevice - musicalOrigin_);
 
 		const Tick pressTick = tempoMap_.tickAtOrBefore(pressSample);
-		const bool validTrack = command.track >= 0 && command.track < numTracks();
+		const bool validTrack = command.track >= 0 && command.track < std::min(numTracks(), activeTracks_.load(std::memory_order_relaxed));
 		auto* track = validTrack ? &tracks_[static_cast<std::size_t>(command.track)] : nullptr;
 		auto* pending = validTrack ? &pending_[static_cast<std::size_t>(command.track)] : nullptr;
 
@@ -453,7 +498,7 @@ namespace boohcleur
 				if (maxEnd <= pending.target)
 					maxEnd = pending.target + maxTicks;
 
-				pending_[static_cast<std::size_t>(index)] = { PendingAction::CloseRecording, maxEnd };
+				pending_[static_cast<std::size_t>(index)] = { PendingAction::CloseRecording, maxEnd, true };
 			}
 			break;
 
@@ -474,6 +519,88 @@ namespace boohcleur
 		}
 
 		(void)at;
+	}
+
+	void Engine::renderTracks(SamplePos at, int numFrames, float* const* out, int numOut) noexcept
+	{
+		const int active = activeTracks_.load(std::memory_order_relaxed);
+		const int channels = config_.numChannels;
+		const float step = 1.0f / static_cast<float>(std::max(1, static_cast<int>(config_.fadeMilliseconds * 0.001 * config_.sampleRate)));
+		float* scratch[2] = { scratch_[0].data(), scratch_[static_cast<std::size_t>(std::min(1, channels - 1))].data() };
+
+		for (std::size_t t = 0; t < tracks_.size(); ++t)
+		{
+			const auto& mixer = mixer_[t];
+			const float target = static_cast<int>(t) < active && !mixer.muted.load(std::memory_order_relaxed)
+				? mixer.volume.load(std::memory_order_relaxed) : 0.0f;
+			float& gain = mixGain_[t];
+
+			for (int c = 0; c < channels; ++c)
+				std::fill(scratch_[static_cast<std::size_t>(c)].begin(), scratch_[static_cast<std::size_t>(c)].begin() + numFrames, 0.0f);
+
+			// La boucle avance même muette : elle reste calée sur l'horloge.
+			tracks_[t].render(tempoMap_, at, numFrames, scratch);
+
+			if (gain == 0.0f && target == 0.0f)
+				continue;
+
+			for (int i = 0; i < numFrames; ++i)
+			{
+				gain += std::clamp(target - gain, -step, step);
+
+				for (int c = 0; c < numOut; ++c)
+					out[c][i] += scratch[std::min(c, channels - 1)][i] * gain;
+			}
+		}
+	}
+
+	void Engine::setActiveTracks(int count) noexcept
+	{
+		// Avant prepare(), la configuration par défaut fait foi (réglages restaurés).
+		activeTracks_.store(std::clamp(count, 1, config_.numTracks));
+
+		if (selected_.load() >= activeTracks_.load())
+			selected_.store(activeTracks_.load() - 1);
+	}
+
+	void Engine::setSelectedTrack(int track) noexcept
+	{
+		if (track >= 0 && track < activeTracks_.load())
+			selected_.store(track);
+	}
+
+	void Engine::setTrackVolume(int track, float gain) noexcept
+	{
+		if (track >= 0 && track < maxTrackCount)
+			mixer_[static_cast<std::size_t>(track)].volume.store(std::clamp(gain, 0.0f, 4.0f));
+	}
+
+	float Engine::trackVolume(int track) const noexcept
+	{
+		return track >= 0 && track < maxTrackCount ? mixer_[static_cast<std::size_t>(track)].volume.load() : 0.0f;
+	}
+
+	void Engine::setTrackMuted(int track, bool muted) noexcept
+	{
+		if (track >= 0 && track < maxTrackCount)
+			mixer_[static_cast<std::size_t>(track)].muted.store(muted);
+	}
+
+	bool Engine::trackMuted(int track) const noexcept
+	{
+		return track >= 0 && track < maxTrackCount && mixer_[static_cast<std::size_t>(track)].muted.load();
+	}
+
+	MemorySnapshot Engine::memorySnapshot() const noexcept
+	{
+		MemorySnapshot snapshot;
+		const std::size_t chunkBytes = static_cast<std::size_t>(pool_.numChannels()) * static_cast<std::size_t>(pool_.chunkFrames()) * sizeof(float);
+		const auto used = static_cast<std::size_t>(usedChunks_.load(std::memory_order_relaxed));
+		snapshot.totalBytes = pool_.bytes();
+		snapshot.usedBytes = used * chunkBytes;
+		const auto freeChunks = static_cast<double>(pool_.numChunks()) - static_cast<double>(used);
+		snapshot.secondsLeft = freeChunks * pool_.chunkFrames() / config_.sampleRate;
+		return snapshot;
 	}
 
 	void Engine::renderMetronome(SamplePos blockStart, int numFrames, float* const* out, int numOut) noexcept
@@ -538,6 +665,7 @@ namespace boohcleur
 			shared.state.store(static_cast<int>(track.state()), std::memory_order_relaxed);
 			shared.pending.store(static_cast<int>(pending_[t].action), std::memory_order_relaxed);
 			shared.pendingTarget.store(pending_[t].target, std::memory_order_relaxed);
+			shared.pendingAutomatic.store(pending_[t].automatic, std::memory_order_relaxed);
 			shared.numLayers.store(track.numLayers(), std::memory_order_relaxed);
 			shared.numActive.store(track.numActiveLayers(), std::memory_order_relaxed);
 			shared.loopLength.store(track.hasContent() ? track.loopLength() : 0, std::memory_order_relaxed);
@@ -549,6 +677,7 @@ namespace boohcleur
 				std::memory_order_relaxed);
 		}
 
+		usedChunks_.store(pool_.usedChunks(), std::memory_order_relaxed);
 		transportPlaying_.store(clock_.isPlaying() && transportStopAt_ < 0, std::memory_order_relaxed);
 		transportTick_.store(tempoMap_.tickAtOrBefore(blockStart), std::memory_order_relaxed);
 	}
@@ -564,6 +693,7 @@ namespace boohcleur
 		snapshot.state = static_cast<TrackState>(shared.state.load(std::memory_order_relaxed));
 		snapshot.pending = static_cast<PendingAction>(shared.pending.load(std::memory_order_relaxed));
 		snapshot.pendingTarget = shared.pendingTarget.load(std::memory_order_relaxed);
+		snapshot.pendingAutomatic = shared.pendingAutomatic.load(std::memory_order_relaxed);
 		snapshot.numLayers = shared.numLayers.load(std::memory_order_relaxed);
 		snapshot.numActiveLayers = shared.numActive.load(std::memory_order_relaxed);
 		snapshot.loopLength = shared.loopLength.load(std::memory_order_relaxed);

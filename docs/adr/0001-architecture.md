@@ -77,6 +77,12 @@ Inspiration : les loopers tactiles à canevas (type Loopy Pro), pour leurs princ
 ### D10. Nombre de boucles : libre, 6 par défaut, plafond réglable
 Le moteur gère N boucles. Un projet neuf en propose 6. Un plafond logiciel (`maxLoops`) fixé par la cible limite N : la version lite de la tête pourra le bloquer à 4 selon la charge mesurée. Aucune structure ne suppose un nombre fixe, pour pouvoir faire évoluer ces valeurs.
 
+### D11. Mémoire des boucles (J4)
+
+Toutes les boucles puisent dans une réserve unique (`SamplePool`) réservée au démarrage et découpée en blocs de 16 384 images (0,34 s à 48 kHz). Une couche ne prend que les blocs de ce qu'elle a enregistré et les rend à l'effacement ou quand un nouvel overdub abandonne des couches annulées. Aucune allocation sur le thread audio. Réserve vide : la suite de la prise reste muette et l'interface l'annonce, rien ne casse.
+
+Valeurs du bureau : 512 Mo (environ 23 min de son stéréo à 48 kHz, toutes boucles et couches confondues), boucle de 5 min au plus, 16 couches par boucle. Sans réserve partagée, six boucles de 60 s à 8 couches demandaient 1,1 Go réservé d'avance. Sur la tête, le budget sera fixé au portage (T1) ; une réserve plus petite suffit, le code ne change pas.
+
 ## Modèle de données (cible)
 
 - **Project** : version du format, fréquence d'échantillonnage, tempo et signature (constants en V1, structure prête pour une tempo map), grille, pistes, sections (une section implicite en V1), mappings MIDI, réglages.
@@ -136,7 +142,7 @@ Principe : avoir un looper jouable à la guitare dès J2, puis au pied dès J3, 
 1. OS prioritaires (Windows et macOS pour le bureau, Linux aarch64 pour le moteur).
 2. Mono ou stéréo dans la tête (mono dans la tête, stéréo sur le bureau ; le moteur gère les deux).
 3. Signal enregistré dans la tête : avant ou après NAM (après la chaîne).
-4. Budget RAM, longueur maximale de boucle, profondeur d'undo (à chiffrer après J3).
+4. ~~Budget RAM, longueur maximale de boucle, profondeur d'undo~~ : tranché en J4, voir D11.
 5. Changement de BPM côté DAW en V1 (tempo du projet verrouillé, avec avertissement).
 6. Fenêtre de tolérance après une frontière et durée du tampon circulaire (à mesurer).
 7. Max Shift : borner ou ignorer l'attaque hors fenêtre (ignorer).

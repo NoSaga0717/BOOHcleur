@@ -16,6 +16,8 @@ namespace boohcleur::ui
 			case ControlAction::TrackClear: return "Effacer (deux appuis)";
 			case ControlAction::TransportToggle: return "Transport (démarrer / arrêter)";
 			case ControlAction::MetronomeToggle: return "Métronome";
+			case ControlAction::SelectNext: return "Boucle suivante";
+			case ControlAction::SelectPrevious: return "Boucle précédente";
 			case ControlAction::None:
 			case ControlAction::Count: break;
 			}
@@ -55,9 +57,36 @@ namespace boohcleur::ui
 		return {};
 	}
 
-	MidiPanel::MidiPanel(MidiControl& control)
+	bool MidiPanel::isLoopAction(ControlAction action)
+	{
+		return action >= ControlAction::TrackMain && action <= ControlAction::TrackClear;
+	}
+
+	std::uint8_t MidiPanel::targetTrack() const
+	{
+		const int id = targetBox_.getSelectedId();
+		return id <= 1 ? selectedTrack : static_cast<std::uint8_t>(id - 2);
+	}
+
+	MidiPanel::MidiPanel(MidiControl& control, int numTracks)
 		: control_(control)
 	{
+		targetCaption_.setText(fr("Pédales de :"), juce::dontSendNotification);
+		styleLabel(targetCaption_, 14.0f, colours::textDim);
+		targetCaption_.setJustificationType(juce::Justification::centredRight);
+		addAndMakeVisible(targetCaption_);
+
+		targetBox_.addItem(fr("la boucle sélectionnée"), 1);
+
+		for (int t = 0; t < numTracks; ++t)
+			targetBox_.addItem("la boucle " + juce::String(t + 1), t + 2);
+
+		targetBox_.setSelectedId(1, juce::dontSendNotification);
+		targetBox_.setWantsKeyboardFocus(false);
+		targetBox_.setTooltip(fr("Une pédale peut viser la boucle sélectionnée (avec « boucle suivante ») ou une boucle précise"));
+		targetBox_.onChange = [this] { refresh(state_, false); };
+		addAndMakeVisible(targetBox_);
+
 		title_.setText(fr("Pédalier MIDI"), juce::dontSendNotification);
 		styleLabel(title_, 22.0f, colours::text, true);
 		addAndMakeVisible(title_);
@@ -180,7 +209,7 @@ namespace boohcleur::ui
 		request.type = ControlRequest::Type::StartLearn;
 		request.binding.action = static_cast<ControlAction>(action + 1);
 		request.binding.gesture = static_cast<Gesture>(gesture);
-		request.binding.track = 0;
+		request.binding.track = isLoopAction(request.binding.action) ? targetTrack() : selectedTrack;
 		return request;
 	}
 
@@ -190,7 +219,8 @@ namespace boohcleur::ui
 		const auto target = learnRequest(action, gesture).binding;
 
 		// Clic sur la case en cours d'apprentissage : annulation.
-		if (state_.learning && state_.learnTarget.action == target.action && state_.learnTarget.gesture == target.gesture)
+		if (state_.learning && state_.learnTarget.action == target.action && state_.learnTarget.gesture == target.gesture
+			&& state_.learnTarget.track == target.track)
 		{
 			ControlRequest request;
 			request.type = ControlRequest::Type::CancelLearn;
@@ -275,11 +305,14 @@ namespace boohcleur::ui
 				cell.bindingIndex = -1;
 				juce::String text;
 
+				const bool perLoop = isLoopAction(action);
+				const auto target = targetTrack();
+
 				for (int i = 0; i < state.numBindings; ++i)
 				{
 					const auto& b = state.bindings[static_cast<std::size_t>(i)];
 
-					if (b.action == action && b.gesture == gesture)
+					if (b.action == action && b.gesture == gesture && (!perLoop || b.track == target))
 					{
 						if (cell.bindingIndex < 0)
 						{
@@ -293,7 +326,8 @@ namespace boohcleur::ui
 					}
 				}
 
-				const bool learning = state.learning && state.learnTarget.action == action && state.learnTarget.gesture == gesture;
+				const bool learning = state.learning && state.learnTarget.action == action && state.learnTarget.gesture == gesture
+					&& (!perLoop || state.learnTarget.track == target);
 
 				if (learning)
 					text = fr("Appuyez sur la pédale…");
@@ -342,7 +376,9 @@ namespace boohcleur::ui
 			top.removeFromRight(10);
 		}
 
-		title_.setBounds(top);
+		title_.setBounds(top.removeFromLeft(200));
+		targetBox_.setBounds(top.removeFromRight(220));
+		targetCaption_.setBounds(top.removeFromRight(110));
 		area.removeFromTop(6);
 		lastMessage_.setBounds(area.removeFromTop(22));
 		help_.setBounds(area.removeFromTop(20));
