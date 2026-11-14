@@ -285,3 +285,18 @@ TEST_CASE("Pedalier : boucle selectionnee, suivante et boucle dediee")
 	CHECK(rig.engine.trackSnapshot(2).state != TrackState::Empty);
 	CHECK(rig.engine.selectedTrack() == 2);
 }
+
+TEST_CASE("Boucle libre : quantification immediate, longueur au temps pres")
+{
+	Rig rig;
+	rig.engine.setQuantizeDivision(GridDivision::Immediate);
+	rig.input = [](std::int64_t i) { return i == 5000 ? 1.0f : 0.0f; };
+	rig.at(1000, CommandType::TrackMain, 0);	// traité au bloc 896, au tick d'avant : 875
+	rig.at(70000, CommandType::TrackMain, 0);	// bloc 69888 : 69875
+	rig.run(4 * bar);
+
+	const auto length = rig.engine.trackSnapshot(0).loopLength;
+	CHECK(length == 69875 - 875);	// ni mesure ni temps : la durée jouée, au tick près (0,5 ms)
+	CHECK(rig.out(5000 + length) == 1.0f);
+	CHECK(rig.out(5000 + 3 * length) == 1.0f);
+}
