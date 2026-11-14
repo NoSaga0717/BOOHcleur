@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Application de test : l'activité et l'application sont celles de JUCE
-     (com.rmsl.juce), qui chargent libjuce_jni.so compilée depuis android/native. -->
+<!-- Application de test : l'application JUCE (com.rmsl.juce.JuceApp) charge
+     libjuce_jni.so, compilée depuis android/native. L'activité est celle
+     d'Android, comme dans l'exportateur du Projucer : com.rmsl.juce.JuceActivity
+     appelle des méthodes natives qui n'existent qu'avec les notifications push,
+     et l'app plantait dès le premier onResume. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
 	<uses-permission android:name="android.permission.RECORD_AUDIO" />
@@ -17,7 +20,7 @@
 		android:allowBackup="false">
 
 		<activity
-			android:name="com.rmsl.juce.JuceActivity"
+			android:name="android.app.Activity"
 			android:exported="true"
 			android:launchMode="singleTask"
 			android:hardwareAccelerated="true"

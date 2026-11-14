@@ -7,7 +7,7 @@ PKG=fr.boohcleur.looper
 
 adb logcat -c
 adb install -r -g "$APK"
-adb shell am start -W -n "$PKG/com.rmsl.juce.JuceActivity"
+adb shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1
 sleep 15
 adb exec-out screencap -p > smoke-screen.png
 adb logcat -d > logcat.txt

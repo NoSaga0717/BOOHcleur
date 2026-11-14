@@ -85,12 +85,11 @@ android {
 
 	sourceSets {
 		getByName("main") {
-			// Classes Java de JUCE (application, activité) : mêmes dossiers que
+			// Classes Java de JUCE (chargement de la bibliothèque, application) : mêmes dossiers que
 			// ceux que l'exportateur Android du Projucer ajoute au projet.
 			java.srcDirs(
 				juceDir.resolve("modules/juce_core/native/javacore/init"),
 				juceDir.resolve("modules/juce_core/native/javacore/app"),
-				juceDir.resolve("modules/juce_gui_basics/native/javaopt/app"),
 			)
 		}
 	}
