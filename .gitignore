@@ -5,3 +5,4 @@ out/
 .idea/
 *.user
 .DS_Store
+build-*/

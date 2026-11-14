@@ -13,9 +13,13 @@ add_executable(boohcleur-tests
 	TempoMapTests.cpp
 	GridTests.cpp
 	TransportClockTests.cpp
+	InputRingBufferTests.cpp
+	EngineTests.cpp
 )
 target_link_libraries(boohcleur-tests PRIVATE boohcleur::core Catch2::Catch2WithMain)
 
 list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
 include(Catch)
 catch_discover_tests(boohcleur-tests)
+
+target_link_libraries(boohcleur-tests PRIVATE boohcleur-warnings)

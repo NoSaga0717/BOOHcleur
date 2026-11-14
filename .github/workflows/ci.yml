@@ -15,17 +15,44 @@ jobs:
         include:
           - name: Linux x64
             os: ubuntu-24.04
+            app: OFF
           - name: Linux aarch64
             os: ubuntu-24.04-arm
+            app: OFF
           - name: Windows x64
             os: windows-2022
-          - name: macOS
+            app: ON
+          - name: macOS (universel)
             os: macos-15
+            app: ON
+            cmake_extra: '-DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0'
     steps:
       - uses: actions/checkout@v5
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBOOHCLEUR_BUILD_APP=${{ matrix.app }} ${{ matrix.cmake_extra }}
       - name: Build
         run: cmake --build build --config Release --parallel
       - name: Test
         run: ctest --test-dir build --build-config Release --output-on-failure
+
+      # Application Standalone téléchargeable depuis la page de l'exécution CI.
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          APP="build/app/BOOHcleur_artefacts/Release/Standalone/BOOHcleur.app"
+          lipo -info "$APP/Contents/MacOS/BOOHcleur"
+          # Signature ad hoc : sans elle, macOS refuse de lancer l'app sur Apple Silicon.
+          codesign --force --deep --sign - "$APP"
+          ditto -c -k --keepParent "$APP" BOOHcleur-macOS.zip
+      - name: Upload (macOS)
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: BOOHcleur-macOS
+          path: BOOHcleur-macOS.zip
+      - name: Upload (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: BOOHcleur-Windows
+          path: build/app/BOOHcleur_artefacts/Release/Standalone/BOOHcleur.exe
