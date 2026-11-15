@@ -592,4 +592,93 @@ namespace boohcleur
 
 		capture.kind = CaptureKind::None;
 	}
+
+	int LoopTrack::stableLayers() const noexcept
+	{
+		if (state_ == TrackState::Empty || state_ == TrackState::Armed || state_ == TrackState::Recording
+			|| clearing_ || !hasContent())
+			return 0;
+
+		int stable = numLayers_;
+
+		for (const auto& capture : captures_)
+		{
+			if (capture.kind == CaptureKind::First)
+				return 0;	// fin de la première prise encore en cours d'écriture
+
+			if (capture.kind == CaptureKind::Overdub)
+				stable = std::min(stable, capture.layer);
+		}
+
+		return std::max(stable, 0);
+	}
+
+	void LoopTrack::reset() noexcept
+	{
+		resetContent();
+		state_ = TrackState::Empty;
+	}
+
+	bool LoopTrack::restore(const LoopSpan& span, SamplePos loopLength, int numActive, const RestoredLayer* layers,
+		int numLayers, bool playing) noexcept
+	{
+		reset();
+
+		if (pool_ == nullptr || layers == nullptr || numLayers < 1 || numLayers > config_.maxLayers
+			|| loopLength < 1 || loopLength > config_.maxLoopSamples || span.length <= 0)
+			return false;
+
+		const SamplePos capacity = config_.maxLoopSamples + 2;
+		const int frames = pool_->chunkFrames();
+
+		for (int l = 0; l < numLayers; ++l)
+		{
+			const auto& source = layers[l];
+			auto& layer = layers_[static_cast<std::size_t>(l)];
+
+			if (source.count < 0 || source.count > capacity || source.startOffset < 0 || source.startOffset >= loopLength
+				|| (source.count > 0 && source.channels == nullptr))
+			{
+				reset();
+				return false;
+			}
+
+			layer.startOffset = source.startOffset;
+			layer.gain = l < numActive ? 1.0f : 0.0f;
+
+			for (SamplePos index = 0; index < source.count; index += frames)
+			{
+				if (!ensure(layer, index))
+				{
+					reset();
+					return false;
+				}
+
+				const auto n = static_cast<std::size_t>(std::min<SamplePos>(frames, source.count - index));
+
+				for (int c = 0; c < config_.numChannels; ++c)
+				{
+					const float* from = source.channels[c] + index;
+					std::copy(from, from + n, &sample(layer, c, index));
+
+					for (std::size_t i = 0; i < n; ++i)
+						notePeak(l, index + static_cast<SamplePos>(i), from[i]);
+				}
+			}
+
+			layer.count = source.count;
+		}
+
+		span_ = span;
+		hasSpan_ = true;
+		loopLength_ = loopLength;
+		recordStartTick_ = span.anchor;
+		numLayers_ = numLayers;
+		numActive_ = std::clamp(numActive, 0, numLayers);
+		trackGain_ = 0.0f;
+		trackTarget_ = playing ? 1.0f : 0.0f;
+		state_ = playing ? TrackState::Playing : TrackState::Stopped;
+		publishLayers();
+		return true;
+	}
 }

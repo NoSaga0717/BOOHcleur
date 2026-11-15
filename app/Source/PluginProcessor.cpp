@@ -22,6 +22,8 @@ bool BoohcleurProcessor::isBusesLayoutSupported(const BusesLayout& layouts) cons
 
 void BoohcleurProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 {
+	// Une sauvegarde lit encore le moteur : on attend qu'elle finisse.
+	sessions_.waitUntilIdle();
 	prepared_.store(false);
 
 	boohcleur::EngineConfig config;
@@ -168,6 +170,12 @@ namespace
 
 void BoohcleurProcessor::getStateInformation(juce::MemoryBlock& data)
 {
+	if (const auto xml = juce::parseXML(stateXml()))
+		copyXmlToBinary(*xml, data);
+}
+
+juce::String BoohcleurProcessor::stateXml()
+{
 	juce::XmlElement root("BOOHcleur");
 	root.setAttribute("version", 2);
 
@@ -213,26 +221,43 @@ void BoohcleurProcessor::getStateInformation(juce::MemoryBlock& data)
 		e->setAttribute("track", b.track == boohcleur::selectedTrack ? -1 : static_cast<int>(b.track));	// -1 : boucle sélectionnée
 	}
 
-	copyXmlToBinary(root, data);
+	return root.toString();
 }
 
 void BoohcleurProcessor::setStateInformation(const void* data, int size)
 {
-	const auto root = getXmlFromBinary(data, size);
+	if (const auto root = getXmlFromBinary(data, size))
+		applyState(*root, false);
+}
 
-	if (root == nullptr || !root->hasTagName("BOOHcleur"))
+void BoohcleurProcessor::applyStateXml(const juce::String& xml, bool fromSession)
+{
+	if (const auto root = juce::parseXML(xml))
+		applyState(*root, fromSession);
+}
+
+void BoohcleurProcessor::applyState(const juce::XmlElement& xml, bool fromSession)
+{
+	const auto* root = &xml;
+
+	if (!root->hasTagName("BOOHcleur"))
 		return;
 
 	if (const auto* s = root->getChildByName("Settings"))
 	{
 		savedBpm_.store(juce::jlimit(40.0, 240.0, s->getDoubleAttribute("bpm", 120.0)));
-		setLatencyMilliseconds(juce::jlimit(0.0, 50.0, s->getDoubleAttribute("latencyMs", 0.0)));
+
+		if (!fromSession)
+			setLatencyMilliseconds(juce::jlimit(0.0, 50.0, s->getDoubleAttribute("latencyMs", 0.0)));
+
 		engine_.setLateToleranceMilliseconds(static_cast<float>(juce::jlimit(0.0, 200.0, s->getDoubleAttribute("toleranceMs", 80.0))));
 		engine_.setQuantizeDivision(static_cast<boohcleur::GridDivision>(
 			juce::jlimit(0, 2, s->getIntAttribute("quantize", static_cast<int>(boohcleur::GridDivision::Bar)))));
 		engine_.setMetronomeEnabled(s->getBoolAttribute("metronome", true));
 		engine_.setMonitorEnabled(s->getBoolAttribute("monitor", false));
-		engine_.setInputMode(static_cast<boohcleur::InputMode>(juce::jlimit(0, 2, s->getIntAttribute("input", 0))));
+		if (!fromSession)
+			engine_.setInputMode(static_cast<boohcleur::InputMode>(juce::jlimit(0, 2, s->getIntAttribute("input", 0))));
+
 		engine_.setMasterVolume(static_cast<float>(juce::jlimit(0.0, 1.5, s->getDoubleAttribute("master", 1.0))));
 		engine_.setActiveTracks(s->getIntAttribute("tracks", 6));
 		engine_.setSelectedTrack(s->getIntAttribute("selected", 0));

@@ -119,6 +119,34 @@ namespace boohcleur
 		SamplePos publishedCount(int layer) const noexcept;
 		float peak(int layer, std::size_t bin) const noexcept;
 
+		// --- Sessions (J5) ---
+
+		// Couches terminées, que plus aucune capture ne modifie : 0 pendant la
+		// première prise, sinon les couches avant celle qu'un overdub écrit encore.
+		// Thread audio.
+		int stableLayers() const noexcept;
+		SamplePos layerStart(int layer) const noexcept { return layers_[static_cast<std::size_t>(layer)].startOffset; }
+		SamplePos layerCount(int layer) const noexcept { return layers_[static_cast<std::size_t>(layer)].count; }
+		const std::vector<int>& layerChunks(int layer) const noexcept { return layers_[static_cast<std::size_t>(layer)].chunks; }
+		int chunksPerLayer() const noexcept { return layers_.empty() ? 0 : static_cast<int>(layers_[0].chunks.size()); }
+
+		struct RestoredLayer
+		{
+			SamplePos startOffset = 0;
+			SamplePos count = 0;
+			const float* const* channels = nullptr;	// numChannels pointeurs, count échantillons
+		};
+
+		// Remplace le contenu par une boucle relue d'une session : couches
+		// recopiées dans la réserve, état Playing ou Stopped. Thread de contrôle,
+		// moteur suspendu (aucun appel concurrent). Rend false (piste vidée) si
+		// la réserve est pleine ou si les données ne tiennent pas dans la piste.
+		bool restore(const LoopSpan& span, SamplePos loopLength, int numActive, const RestoredLayer* layers,
+			int numLayers, bool playing) noexcept;
+
+		// Vide la piste tout de suite, sans fondu (chargement d'une session).
+		void reset() noexcept;
+
 	private:
 		struct Layer
 		{

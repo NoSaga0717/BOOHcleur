@@ -50,5 +50,5 @@ cmake --build build-mobile -j
 ## Limites connues
 
 - Entrée : micro du téléphone seulement pour l'instant. Une interface audio USB (class compliant) devrait apparaître comme périphérique Android, mais ce n'est pas testé et l'app ne propose pas encore de choisir le périphérique.
-- Pas de pilotage MIDI ni de sessions sur cette version.
+- Pas de pilotage MIDI ni de sessions sur cette version (le format de session existe, l'interface mobile ne l'utilise pas encore).
 - Latence non calibrée (calibration automatique prévue en J7).

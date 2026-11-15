@@ -17,8 +17,9 @@ add_executable(boohcleur-tests
 	EngineTests.cpp
 	MidiControlTests.cpp
 	MultiTrackTests.cpp
+	SessionTests.cpp
 )
-target_link_libraries(boohcleur-tests PRIVATE boohcleur::core Catch2::Catch2WithMain)
+target_link_libraries(boohcleur-tests PRIVATE boohcleur::core boohcleur::session Catch2::Catch2WithMain)
 
 list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
 include(Catch)

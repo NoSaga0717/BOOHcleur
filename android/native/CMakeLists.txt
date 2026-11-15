@@ -51,6 +51,7 @@ target_compile_definitions(juce_jni PRIVATE
 target_link_libraries(juce_jni
 	PRIVATE
 		boohcleur::core
+		boohcleur::session
 		BOOHcleurAssets
 		juce::juce_audio_utils
 		juce::juce_recommended_config_flags

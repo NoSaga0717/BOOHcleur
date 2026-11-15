@@ -29,13 +29,20 @@ namespace boohcleur
 		int numChannels() const noexcept { return numChannels_; }
 		int chunkFrames() const noexcept { return chunkFrames_; }
 		int numChunks() const noexcept { return static_cast<int>(free_.size()); }
-		int usedChunks() const noexcept { return numChunks() - numFree_; }
+		int usedChunks() const noexcept { return numChunks() - numFree_ - numDeferred_; }
 		int freeChunks() const noexcept { return numFree_; }
 		std::size_t bytes() const noexcept;
 
 		// Bloc libre, ou -1 si la réserve est vide.
 		int acquire() noexcept;
 		void release(int chunk) noexcept;
+
+		// Pendant une sauvegarde, un autre thread lit des blocs : ceux qu'on
+		// rend sont mis de côté et ne retournent à la réserve qu'au unpin(),
+		// pour ne jamais être réécrits pendant qu'on les lit.
+		void pin() noexcept { pinned_ = true; }
+		void unpin() noexcept;
+		bool isPinned() const noexcept { return pinned_; }
 
 		float* channel(int chunk, int c) noexcept
 		{
@@ -51,7 +58,10 @@ namespace boohcleur
 	private:
 		std::unique_ptr<float[]> data_;
 		std::vector<int> free_;		// pile des blocs libres
+		std::vector<int> deferred_;	// rendus pendant un pin()
 		int numFree_ = 0;
+		int numDeferred_ = 0;
+		bool pinned_ = false;
 		int numChannels_ = 2;
 		int chunkFrames_ = defaultChunkFrames;
 	};

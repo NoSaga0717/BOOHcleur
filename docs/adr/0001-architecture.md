@@ -83,6 +83,17 @@ Toutes les boucles puisent dans une réserve unique (`SamplePool`) réservée au
 
 Valeurs du bureau : 512 Mo (environ 23 min de son stéréo à 48 kHz, toutes boucles et couches confondues), boucle de 5 min au plus, 16 couches par boucle. Sans réserve partagée, six boucles de 60 s à 8 couches demandaient 1,1 Go réservé d'avance. Sur la tête, le budget sera fixé au portage (T1) ; une réserve plus petite suffit, le code ne change pas.
 
+### D12. Sessions (J5)
+
+Une session est un dossier `Nom.boohcleur` autonome, sans chemin absolu : `session.json` (manifeste versionné, `version` 1), une couche par fichier WAV flottant 32 bits dans `audio/`, et les fichiers de l'application (`reglages.xml` : réglages, mixeur, affectations MIDI). Chaque fichier a son empreinte FNV-1a 64 bits dans le manifeste : un fichier manquant ou abîmé est nommé à l'ouverture. Une session d'une version plus récente du format est refusée avec un message. Les couches annulées sont gardées : le redo marche encore après réouverture.
+
+- Écriture atomique : tout est écrit dans `Nom.boohcleur.tmp`, manifeste en dernier ; puis l'ancienne version devient `.old`, la nouvelle prend sa place, `.old` est effacé. Après une coupure à n'importe quel moment, l'ouverture retrouve une version complète (la nouvelle, sinon `.old`).
+- Sauvegarde sans couper le son : le thread audio fige en tête de bloc la liste des blocs de chaque couche terminée et épingle la réserve (D11) ; les blocs rendus pendant l'écriture (effacement, overdub qui abandonne des couches) sont mis de côté et ne sont réutilisés qu'à la fin. Une couche encore en cours d'écriture (première prise, overdub) n'est pas sauvegardée.
+- Chargement : le moteur est suspendu (le thread audio sort du silence sans le toucher), les boucles sont recopiées dans la réserve, puis le son reprend, transport arrêté : les boucles repartent ensemble à la mesure 1 au démarrage. La latence et l'entrée enregistrée restent celles du matériel en place.
+- Fréquence d'échantillonnage différente de celle de la session : ouverture refusée avec un message (pas de rééchantillonnage en V1).
+- Application autonome : sauvegarde automatique toutes les 30 s si quelque chose a changé, dans le dossier de l'application ; au lancement suivant un plantage, ou une fermeture avec des boucles non enregistrées, l'application propose de les récupérer.
+- Le format est lu et écrit par `boohcleur-session` (C++20 et nlohmann/json, sans JUCE), pour servir aussi sur la tête.
+
 ## Modèle de données (cible)
 
 - **Project** : version du format, fréquence d'échantillonnage, tempo et signature (constants en V1, structure prête pour une tempo map), grille, pistes, sections (une section implicite en V1), mappings MIDI, réglages.
@@ -149,7 +160,7 @@ Principe : avoir un looper jouable à la guitare dès J2, puis au pied dès J3, 
 8. Convention de swing.
 9. Écrêtage de la somme : limiteur doux ou marge fixe.
 10. État du plugin (VST3, AU) : dossier projet référencé (chemin relatif quand c'est possible).
-11. Format de projet : dossier JSON + WAV float32.
+11. ~~Format de projet~~ : tranché en J5, voir D12.
 12. Machine de référence et première interface audio.
 13. Chemin du MIDI dans la tête : `web.py` ou JACK (JACK, pour l'horodatage).
 
@@ -160,5 +171,5 @@ Principe : avoir un looper jouable à la guitare dès J2, puis au pied dès J3, 
 | JUCE 8 | AGPLv3 ou commercial | Enveloppes (Standalone, VST3, AU) et interface de bureau |
 | VST3 SDK 3.8 | MIT | Format VST3 (via JUCE) |
 | Signalsmith Stretch | MIT | Rendu Smart Quantize |
-| dr_libs | domaine public ou MIT-0 | Lecture et écriture WAV |
+| nlohmann/json 3.11.3 | MIT | Manifeste des sessions (J5) ; le WAV flottant est écrit et lu par notre code, dr_libs n'est plus nécessaire |
 | Catch2 | BSL-1.0 | Tests |

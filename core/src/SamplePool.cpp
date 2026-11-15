@@ -25,6 +25,9 @@ namespace boohcleur
 			free_[i] = static_cast<int>(count - 1 - i);
 
 		numFree_ = static_cast<int>(count);
+		deferred_.assign(count, -1);
+		numDeferred_ = 0;
+		pinned_ = false;
 		return true;
 	}
 
@@ -43,7 +46,25 @@ namespace boohcleur
 
 	void SamplePool::release(int chunk) noexcept
 	{
-		if (chunk >= 0 && numFree_ < static_cast<int>(free_.size()))
+		if (chunk < 0)
+			return;
+
+		if (pinned_)
+		{
+			if (numDeferred_ < static_cast<int>(deferred_.size()))
+				deferred_[static_cast<std::size_t>(numDeferred_++)] = chunk;
+		}
+		else if (numFree_ < static_cast<int>(free_.size()))
+		{
 			free_[static_cast<std::size_t>(numFree_++)] = chunk;
+		}
+	}
+
+	void SamplePool::unpin() noexcept
+	{
+		pinned_ = false;
+
+		while (numDeferred_ > 0)
+			release(deferred_[static_cast<std::size_t>(--numDeferred_)]);
 	}
 }
