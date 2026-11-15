@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <thread>
 
 namespace boohcleur
 {
@@ -56,6 +57,19 @@ namespace boohcleur
 		masterGain_ = master_.load();
 		usedChunks_.store(0);
 
+		// Sessions : la liste des blocs de chaque couche est réservée ici, le
+		// thread audio n'a plus qu'à la recopier.
+		snapshotState_.store(snapshotIdle);
+		content_.tracks.assign(static_cast<std::size_t>(config.numTracks), TrackContent {});
+
+		for (auto& content : content_.tracks)
+		{
+			content.layers.assign(static_cast<std::size_t>(config.maxLayersPerTrack), LayerContent {});
+
+			for (auto& layer : content.layers)
+				layer.chunks.assign(static_cast<std::size_t>(tracks_.front().chunksPerLayer()), -1);
+		}
+
 		pending_.assign(static_cast<std::size_t>(config.numTracks), Pending {});
 		shared_ = std::make_unique<SharedTrackState[]>(static_cast<std::size_t>(config.numTracks));
 		activeTracks_.store(std::clamp(activeTracks_.load(), 1, config.numTracks));
@@ -95,8 +109,44 @@ namespace boohcleur
 	void Engine::process(const float* const* in, int numIn, float* const* out, int numOut, int numFrames,
 		const MidiEvent* midi, int numMidi) noexcept
 	{
+		// Poignée de main avec suspend() : ordre séquentiel (seq_cst) des deux
+		// côtés, donc soit suspend() voit ce bloc en cours et l'attend, soit ce
+		// bloc voit la demande et ne touche à rien.
+		inProcess_.store(true);
+
+		if (suspendRequested_.load())
+		{
+			for (int c = 0; c < numOut; ++c)
+				std::fill(out[c], out[c] + std::max(numFrames, 0), 0.0f);
+
+			inProcess_.store(false);
+			return;
+		}
+
+		processBlock(in, numIn, out, numOut, numFrames, midi, numMidi);
+		inProcess_.store(false);
+	}
+
+	void Engine::processBlock(const float* const* in, int numIn, float* const* out, int numOut, int numFrames,
+		const MidiEvent* midi, int numMidi) noexcept
+	{
 		if (tracks_.empty() || numFrames <= 0)
 			return;
+
+		// Sauvegarde en cours : figer ou libérer, en tête de bloc.
+		switch (snapshotState_.load(std::memory_order_acquire))
+		{
+		case snapshotRequested:
+			captureContent();
+			snapshotState_.store(snapshotReady, std::memory_order_release);
+			break;
+		case snapshotReleasing:
+			pool_.unpin();
+			snapshotState_.store(snapshotIdle, std::memory_order_release);
+			break;
+		default:
+			break;
+		}
 
 		// Sélection de l'entrée : en mono, un seul canal, que le tampon duplique.
 		const InputMode mode = static_cast<InputMode>(inputMode_.load(std::memory_order_relaxed));
@@ -768,5 +818,208 @@ namespace boohcleur
 		snapshot.bpm = bpm_.load(std::memory_order_relaxed);
 		snapshot.signature = { numerator_.load(std::memory_order_relaxed), denominator_.load(std::memory_order_relaxed) };
 		return snapshot;
+	}
+
+	// --- Sessions ---
+
+	void Engine::captureContent() noexcept
+	{
+		content_.sampleRate = config_.sampleRate;
+		content_.bpm = tempoMap_.bpm();
+		content_.signature = tempoMap_.signature();
+		content_.numChannels = config_.numChannels;
+
+		for (std::size_t t = 0; t < tracks_.size(); ++t)
+		{
+			const auto& track = tracks_[t];
+			auto& content = content_.tracks[t];
+			const int stable = track.stableLayers();
+
+			content.numLayers = stable;
+			content.numActive = std::min(track.numActiveLayers(), stable);
+			content.playing = track.state() == TrackState::Playing || track.state() == TrackState::Overdubbing;
+			content.span = track.span();
+			content.loopLength = stable > 0 ? track.loopLength() : 0;
+
+			for (int l = 0; l < stable; ++l)
+			{
+				auto& layer = content.layers[static_cast<std::size_t>(l)];
+				const auto& chunks = track.layerChunks(l);
+				layer.startOffset = track.layerStart(l);
+				layer.count = track.layerCount(l);
+				std::copy(chunks.begin(), chunks.end(), layer.chunks.begin());
+			}
+		}
+
+		pool_.pin();
+	}
+
+	bool Engine::beginSnapshot() noexcept
+	{
+		if (tracks_.empty())
+			return false;
+
+		int expected = snapshotIdle;
+		return snapshotState_.compare_exchange_strong(expected, snapshotRequested);
+	}
+
+	const ContentSnapshot* Engine::snapshot() const noexcept
+	{
+		return snapshotState_.load(std::memory_order_acquire) == snapshotReady ? &content_ : nullptr;
+	}
+
+	bool Engine::captureSnapshotNow() noexcept
+	{
+		if (!suspendRequested_.load() || snapshotState_.load() != snapshotRequested)
+			return false;
+
+		captureContent();
+		snapshotState_.store(snapshotReady, std::memory_order_release);
+		return true;
+	}
+
+	void Engine::readSnapshot(int track, int layer, int channel, SamplePos start, int count, float* dest) const noexcept
+	{
+		if (dest == nullptr || count <= 0)
+			return;
+
+		std::fill(dest, dest + count, 0.0f);
+
+		if (snapshot() == nullptr || track < 0 || track >= numTracks() || channel < 0 || channel >= config_.numChannels)
+			return;
+
+		const auto& content = content_.tracks[static_cast<std::size_t>(track)];
+
+		if (layer < 0 || layer >= content.numLayers)
+			return;
+
+		const auto& source = content.layers[static_cast<std::size_t>(layer)];
+		const int frames = pool_.chunkFrames();
+		SamplePos index = std::max<SamplePos>(start, 0);
+		const SamplePos end = std::min<SamplePos>(start + count, source.count);
+
+		while (index < end)
+		{
+			const auto slot = static_cast<std::size_t>(index / frames);
+			const SamplePos within = index % frames;
+			const SamplePos n = std::min<SamplePos>(frames - within, end - index);
+
+			if (slot < source.chunks.size() && source.chunks[slot] >= 0)
+			{
+				const float* from = pool_.channel(source.chunks[slot], channel) + within;
+				std::copy(from, from + n, dest + (index - start));
+			}
+
+			index += n;
+		}
+	}
+
+	void Engine::endSnapshot() noexcept
+	{
+		int state = snapshotState_.load();
+
+		if (state == snapshotRequested && snapshotState_.compare_exchange_strong(state, snapshotIdle))
+			return;
+
+		if (state != snapshotReady)
+			return;
+
+		// Audio suspendu : personne d'autre ne touche à la réserve.
+		if (suspendRequested_.load())
+		{
+			pool_.unpin();
+			snapshotState_.store(snapshotIdle);
+			return;
+		}
+
+		snapshotState_.store(snapshotReleasing);
+	}
+
+	void Engine::suspend() noexcept
+	{
+		suspendRequested_.store(true);
+
+		while (inProcess_.load())
+			std::this_thread::yield();
+
+		// Une libération demandée au thread audio se fait ici, puisqu'il ne la fera plus.
+		if (snapshotState_.load() == snapshotReleasing)
+		{
+			pool_.unpin();
+			snapshotState_.store(snapshotIdle);
+		}
+	}
+
+	void Engine::resume() noexcept
+	{
+		suspendRequested_.store(false);
+	}
+
+	RestoreResult Engine::restore(const RestoreRequest& request) noexcept
+	{
+		if (tracks_.empty() || !suspendRequested_.load())
+			return RestoreResult::NotPrepared;
+
+		const auto map = TempoMap::create(config_.sampleRate, request.bpm, request.signature);
+
+		if (!map)
+			return RestoreResult::InvalidTempo;
+
+		for (std::size_t t = tracks_.size(); t < request.tracks.size(); ++t)
+			if (!request.tracks[t].layers.empty())
+				return RestoreResult::TooManyTracks;
+
+		// Tout repart de zéro : transport arrêté, actions planifiées oubliées.
+		clock_.stop();
+		transportStopAt_ = -1;
+
+		for (std::size_t t = 0; t < tracks_.size(); ++t)
+		{
+			tracks_[t].reset();
+			pending_[t] = {};
+			mixGain_[t] = 0.0f;
+		}
+
+		tempoMap_ = *map;
+		clock_.setTempoMap(tempoMap_);
+		bpm_.store(tempoMap_.bpm());
+		numerator_.store(tempoMap_.signature().numerator);
+		denominator_.store(tempoMap_.signature().denominator);
+
+		RestoreResult result = RestoreResult::Ok;
+
+		for (std::size_t t = 0; t < std::min(tracks_.size(), request.tracks.size()) && result == RestoreResult::Ok; ++t)
+		{
+			const auto& source = request.tracks[t];
+
+			if (source.layers.empty())
+				continue;
+
+			// La longueur en échantillons doit être celle que donne le tempo
+			// (même fréquence d'échantillonnage qu'à la sauvegarde).
+			const SamplePos expected = tempoMap_.samplePositionOf(source.span.anchor + source.span.length)
+				- tempoMap_.samplePositionOf(source.span.anchor);
+
+			if (source.span.length <= 0 || source.loopLength != expected)
+			{
+				result = RestoreResult::InvalidLoop;
+				break;
+			}
+
+			if (!tracks_[t].restore(source.span, source.loopLength, source.numActive, source.layers.data(),
+					static_cast<int>(source.layers.size()), source.playing))
+			{
+				const bool tooBig = static_cast<int>(source.layers.size()) > config_.maxLayersPerTrack
+					|| source.loopLength > static_cast<SamplePos>(config_.maxLoopSeconds * config_.sampleRate);
+				result = tooBig ? RestoreResult::InvalidLoop : RestoreResult::OutOfMemory;
+			}
+		}
+
+		if (result != RestoreResult::Ok)
+			for (auto& track : tracks_)
+				track.reset();
+
+		publish(clock_.blockStart());
+		return result;
 	}
 }

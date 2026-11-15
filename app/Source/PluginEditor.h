@@ -34,6 +34,16 @@ private:
 	void showMidiPanel(bool show);
 	void enableNewMidiInputs();
 
+	// Sessions (J5)
+	void showSessionMenu();
+	void saveSession(bool chooseFile);
+	void openSession();
+	void newSession();
+	void offerRecovery();
+	void refreshSettingsFromEngine();
+	void showStatus(const juce::String& text, bool error = false);
+	void askBeforeDiscarding(std::function<void()> then);
+
 	BoohcleurProcessor& processor_;
 	boohcleur::ui::LookAndFeel lookAndFeel_;
 	juce::Image logo_;
@@ -44,7 +54,14 @@ private:
 	int shownTiles_ = numTiles;
 
 	juce::TextButton mainButton_, stopButton_ { "STOP" }, undoButton_ { "UNDO" },
-		redoButton_ { "REDO" }, clearButton_ { "CLEAR" }, transportButton_, midiButton_ { "MIDI" };
+		redoButton_ { "REDO" }, clearButton_ { "CLEAR" }, transportButton_, midiButton_ { "MIDI" },
+		sessionButton_ { "Session" };
+
+	juce::Label sessionLabel_;
+	std::unique_ptr<juce::FileChooser> chooser_;
+	juce::String status_;
+	bool statusError_ = false;
+	juce::uint32 statusUntil_ = 0;
 
 	boohcleur::ui::MidiPanel midiPanel_;
 	juce::StringArray knownMidiInputs_;

@@ -106,6 +106,16 @@ BoohcleurEditor::BoohcleurEditor(BoohcleurProcessor& processor)
 
 	midiPanel_.onClose = [this] { showMidiPanel(false); };
 
+	styleButton(sessionButton_, colours::accent);
+	sessionButton_.onClick = [this] { showSessionMenu(); };
+	sessionButton_.setTooltip(fr("Enregistrer ou ouvrir une session (boucles, couches, réglages, pédalier)"));
+	addAndMakeVisible(sessionButton_);
+
+	sessionLabel_.setColour(juce::Label::textColourId, colours::text);
+	sessionLabel_.setFont(juce::Font(juce::FontOptions(17.0f, juce::Font::bold)));
+	sessionLabel_.setJustificationType(juce::Justification::centredLeft);
+	addAndMakeVisible(sessionLabel_);
+
 #if JucePlugin_Build_Standalone
 	if (processor_.wrapperType == juce::AudioProcessor::wrapperType_Standalone)
 	{
@@ -226,6 +236,20 @@ BoohcleurEditor::BoohcleurEditor(BoohcleurProcessor& processor)
 	enableNewMidiInputs();
 	refresh();
 	startTimerHz(30);
+
+	// Application autonome : sauvegarde automatique, et proposition de
+	// récupérer le travail d'une exécution qui s'est mal terminée.
+	if (juce::JUCEApplicationBase::isStandaloneApp())
+	{
+		processor_.sessions().enableAutosave();
+
+		if (processor_.sessions().hasRecovery())
+			juce::Timer::callAfterDelay(800, [safe = juce::Component::SafePointer<BoohcleurEditor>(this)]
+			{
+				if (safe != nullptr)
+					safe->offerRecovery();
+			});
+	}
 }
 
 BoohcleurEditor::~BoohcleurEditor()
@@ -310,6 +334,17 @@ void BoohcleurEditor::confirmClear()
 bool BoohcleurEditor::keyPressed(const juce::KeyPress& key)
 {
 	const auto c = juce::CharacterFunctions::toLowerCase(key.getTextCharacter());
+
+	// Raccourcis de session (Cmd sur Mac, Ctrl ailleurs) avant les touches simples.
+	if (key.getModifiers().isCommandDown())
+	{
+		const auto k = juce::CharacterFunctions::toLowerCase(static_cast<juce::juce_wchar>(key.getKeyCode()));
+
+		if (k == 's')	{ saveSession(key.getModifiers().isShiftDown()); return true; }
+		if (k == 'o')	{ openSession(); return true; }
+		if (k == 'n')	{ newSession(); return true; }
+		return false;
+	}
 
 	if (key == juce::KeyPress::spaceKey)	{ post(CommandType::TrackMain); return true; }
 	if (c == 's')							{ post(CommandType::TrackStop); return true; }
@@ -408,6 +443,12 @@ void BoohcleurEditor::refresh()
 
 	transportButton_.setButtonText(transport.playing ? fr("Arrêter") : fr("Démarrer"));
 
+	auto& sessions = processor_.sessions();
+	sessionLabel_.setText(sessions.currentName() + (sessions.hasUnsavedChanges() ? fr("  •") : juce::String()),
+		juce::dontSendNotification);
+	sessionLabel_.setTooltip(sessions.currentFile() == juce::File {} ? fr("Session pas encore enregistrée")
+		: sessions.currentFile().getFullPathName());
+
 	const auto bbt = boohcleur::toBarBeatTick(transport.tick, transport.signature);
 	positionLabel_.setText("Mesure " + juce::String(bbt.bar + 1) + fr("  ·  Temps ") + juce::String(bbt.beat + 1)
 		+ "     " + juce::String(transport.bpm, 1) + " BPM", juce::dontSendNotification);
@@ -417,6 +458,12 @@ void BoohcleurEditor::refresh()
 	{
 		hintLabel_.setText(fr("Appuyez encore sur la pédale « effacer » pour confirmer"), juce::dontSendNotification);
 		hintLabel_.setColour(juce::Label::textColourId, colours::forState(TrackState::Recording));
+	}
+	else if (juce::Time::getMillisecondCounter() < statusUntil_ || processor_.sessions().isBusy())
+	{
+		hintLabel_.setText(processor_.sessions().isBusy() && !statusError_ ? fr("Session : opération en cours…") : status_,
+			juce::dontSendNotification);
+		hintLabel_.setColour(juce::Label::textColourId, statusError_ ? colours::forState(TrackState::Recording) : colours::accent);
 	}
 	else
 	{
@@ -503,8 +550,12 @@ void BoohcleurEditor::resized()
 	transportButton_.setBounds(header.removeFromRight(130));
 	header.removeFromRight(10);
 	midiButton_.setBounds(header.removeFromRight(80));
+	header.removeFromRight(10);
+	sessionButton_.setBounds(header.removeFromRight(100));
 	header.removeFromRight(16);
-	positionLabel_.setBounds(header.removeFromRight(400));
+	positionLabel_.setBounds(header.removeFromRight(340));
+	header.removeFromLeft(150);	// logo
+	sessionLabel_.setBounds(header);
 
 	auto settings = area.removeFromBottom(150).reduced(16, 12).reduced(16, 12);
 	hintLabel_.setBounds(area.removeFromBottom(24));
@@ -564,3 +615,189 @@ void BoohcleurEditor::resized()
 	metronomeToggle_.setBounds(fourth.removeFromTop(24));
 	monitorToggle_.setBounds(fourth.removeFromTop(24));
 }
+
+// --- Sessions ---
+
+void BoohcleurEditor::showStatus(const juce::String& text, bool error)
+{
+	status_ = text;
+	statusError_ = error;
+	statusUntil_ = juce::Time::getMillisecondCounter() + (error ? 9000u : 4000u);
+	refresh();
+}
+
+void BoohcleurEditor::showSessionMenu()
+{
+	juce::PopupMenu menu;
+	const bool busy = processor_.sessions().isBusy();
+	menu.addItem(1, fr("Nouvelle session"), !busy);
+	menu.addItem(2, fr("Ouvrir…"), !busy);
+	menu.addSeparator();
+	menu.addItem(3, fr("Enregistrer"), !busy);
+	menu.addItem(4, fr("Enregistrer sous…"), !busy);
+
+	menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&sessionButton_),
+		[safe = juce::Component::SafePointer<BoohcleurEditor>(this)](int result)
+		{
+			if (safe == nullptr)
+				return;
+
+			switch (result)
+			{
+			case 1: safe->newSession(); break;
+			case 2: safe->openSession(); break;
+			case 3: safe->saveSession(false); break;
+			case 4: safe->saveSession(true); break;
+			default: break;
+			}
+		});
+}
+
+void BoohcleurEditor::askBeforeDiscarding(std::function<void()> then)
+{
+	if (!processor_.sessions().hasUnsavedChanges())
+	{
+		then();
+		return;
+	}
+
+	auto options = juce::MessageBoxOptions::makeOptionsOkCancel(juce::MessageBoxIconType::WarningIcon,
+		fr("Boucles non enregistrées"),
+		fr("La session « ") + processor_.sessions().currentName() + fr(" » a des changements non enregistrés. Les abandonner ?"),
+		fr("Abandonner"), fr("Annuler"), this);
+
+	juce::AlertWindow::showAsync(options, [then](int result)
+	{
+		if (result == 1)
+			then();
+	});
+}
+
+void BoohcleurEditor::saveSession(bool chooseFile)
+{
+	auto& sessions = processor_.sessions();
+	const auto done = [safe = juce::Component::SafePointer<BoohcleurEditor>(this)](const SessionManager::Outcome& outcome)
+	{
+		if (safe != nullptr)
+			safe->showStatus(outcome.message, !outcome.ok);
+	};
+
+	if (!chooseFile && sessions.currentFile() != juce::File {})
+	{
+		sessions.save(sessions.currentFile(), done);
+		showStatus(fr("Enregistrement…"));
+		return;
+	}
+
+	const auto folder = SessionManager::defaultFolder();
+	folder.createDirectory();
+	chooser_ = std::make_unique<juce::FileChooser>(fr("Enregistrer la session"),
+		folder.getChildFile(sessions.currentFile() == juce::File {} ? fr("Ma session") : sessions.currentName()),
+		juce::String("*") + boohcleur::session::extension);
+
+	chooser_->launchAsync(juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles
+			| juce::FileBrowserComponent::warnAboutOverwriting,
+		[this, done, safe = juce::Component::SafePointer<BoohcleurEditor>(this)](const juce::FileChooser& chooser)
+		{
+			if (safe == nullptr || chooser.getResult() == juce::File {})
+				return;
+
+			processor_.sessions().save(chooser.getResult(), done);
+			showStatus(fr("Enregistrement…"));
+		});
+}
+
+void BoohcleurEditor::openSession()
+{
+	askBeforeDiscarding([safe = juce::Component::SafePointer<BoohcleurEditor>(this)]
+	{
+		if (safe == nullptr)
+			return;
+
+		const auto folder = SessionManager::defaultFolder();
+		safe->chooser_ = std::make_unique<juce::FileChooser>(fr("Ouvrir une session (dossier .boohcleur)"),
+			folder.isDirectory() ? folder : juce::File::getSpecialLocation(juce::File::userDocumentsDirectory),
+			juce::String("*") + boohcleur::session::extension + ";session.json");
+
+		safe->chooser_->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles
+				| juce::FileBrowserComponent::canSelectDirectories,
+			[safe](const juce::FileChooser& chooser)
+			{
+				if (safe == nullptr || chooser.getResult() == juce::File {})
+					return;
+
+				safe->processor_.sessions().open(chooser.getResult(), [safe](const SessionManager::Outcome& outcome)
+				{
+					if (safe == nullptr)
+						return;
+
+					safe->showStatus(outcome.message, !outcome.ok);
+					safe->refreshSettingsFromEngine();
+				});
+				safe->showStatus(fr("Ouverture…"));
+			});
+	});
+}
+
+void BoohcleurEditor::newSession()
+{
+	askBeforeDiscarding([safe = juce::Component::SafePointer<BoohcleurEditor>(this)]
+	{
+		if (safe != nullptr)
+			safe->processor_.sessions().clearAll([safe](const SessionManager::Outcome& outcome)
+			{
+				if (safe != nullptr)
+					safe->showStatus(outcome.message, !outcome.ok);
+			});
+	});
+}
+
+void BoohcleurEditor::offerRecovery()
+{
+	auto options = juce::MessageBoxOptions::makeOptionsYesNo(juce::MessageBoxIconType::QuestionIcon,
+		fr("Récupérer les boucles ?"),
+		fr("La dernière fois, BOOHcleur s'est fermé avec des boucles non enregistrées. "
+			"La sauvegarde automatique les a gardées : les récupérer ?"),
+		fr("Récupérer"), fr("Ignorer"), this);
+
+	juce::AlertWindow::showAsync(options, [safe = juce::Component::SafePointer<BoohcleurEditor>(this)](int result)
+	{
+		if (safe == nullptr)
+			return;
+
+		auto& sessions = safe->processor_.sessions();
+
+		if (result != 1)
+		{
+			sessions.discardRecovery();
+			return;
+		}
+
+		sessions.recover([safe](const SessionManager::Outcome& outcome)
+		{
+			if (safe == nullptr)
+				return;
+
+			safe->showStatus(outcome.message, !outcome.ok);
+			safe->refreshSettingsFromEngine();
+		});
+	});
+}
+
+// Réglages relus après l'ouverture d'une session.
+void BoohcleurEditor::refreshSettingsFromEngine()
+{
+	auto& engine = processor_.engine();
+	tempoSlider_.setValue(engine.transportSnapshot().bpm, juce::dontSendNotification);
+	toleranceSlider_.setValue(engine.lateToleranceMilliseconds(), juce::dontSendNotification);
+	quantizeBox_.setSelectedId(engine.quantizeDivision() == boohcleur::GridDivision::Beat ? 2
+		: engine.quantizeDivision() == boohcleur::GridDivision::Immediate ? 3 : 1, juce::dontSendNotification);
+	tracksBox_.setSelectedId(engine.activeTracks(), juce::dontSendNotification);
+	masterSlider_.setValue(engine.masterVolume(), juce::dontSendNotification);
+	metronomeToggle_.setToggleState(engine.metronomeEnabled(), juce::dontSendNotification);
+	monitorToggle_.setToggleState(engine.monitorEnabled(), juce::dontSendNotification);
+	midiPanel_.refresh(engine.midiControl().snapshot(), false);
+	resized();
+	refresh();
+}
+

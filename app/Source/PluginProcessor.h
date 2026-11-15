@@ -3,6 +3,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include "boohcleur/core/Engine.h"
+#include "SessionManager.h"
 
 #include <vector>
 
@@ -39,6 +40,14 @@ public:
 	void getStateInformation(juce::MemoryBlock& data) override;
 	void setStateInformation(const void* data, int size) override;
 
+	// Réglages en XML. fromSession : ouverture d'une session, qui garde ce qui
+	// dépend du matériel (latence, entrée enregistrée) au lieu de l'écraser.
+	juce::String stateXml();
+	void applyStateXml(const juce::String& xml, bool fromSession);
+
+	// Enregistrer, ouvrir, sauvegarde automatique (J5).
+	SessionManager& sessions() noexcept { return sessions_; }
+
 	boohcleur::Engine& engine() noexcept { return engine_; }
 	bool isPrepared() const noexcept { return prepared_.load(); }
 
@@ -63,6 +72,11 @@ private:
 	std::atomic<double> savedBpm_ { 120.0 };
 	int maxBlock_ = 0;
 	std::vector<boohcleur::MidiEvent> midiEvents_;
+
+	void applyState(const juce::XmlElement& root, bool fromSession);
+
+	// Après le moteur : détruit avant lui (sauvegarde de fermeture comprise).
+	SessionManager sessions_ { *this };
 
 	JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(BoohcleurProcessor)
 };

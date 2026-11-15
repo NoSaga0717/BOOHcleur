@@ -2,7 +2,9 @@
 // ni fenêtre. Le moteur est piloté hors ligne pour montrer un état réaliste.
 //
 // Usage : boohcleur-screenshot <fichier.png> [scénario]
-// Scénarios : loops (défaut), overdub, armed, recording, empty, midi
+// Scénarios : loops (défaut), overdub, armed, recording, empty, midi,
+// session (les boucles de « loops » enregistrées puis rouvertes dans un
+// second processeur, par le même chemin que l'application)
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
@@ -47,7 +49,7 @@ int main(int argc, char* argv[])
 {
 	if (argc < 2)
 	{
-		std::fprintf(stderr, "usage : %s <fichier.png> [loops|overdub|armed|recording|empty|midi]\n", argv[0]);
+		std::fprintf(stderr, "usage : %s <fichier.png> [loops|overdub|armed|recording|empty|midi|session]\n", argv[0]);
 		return 1;
 	}
 
@@ -65,7 +67,7 @@ int main(int argc, char* argv[])
 	std::int64_t sample = 0;
 	using boohcleur::CommandType;
 
-	if (scenario == "loops")
+	if (scenario == "loops" || scenario == "session")
 	{
 		// Une session en cours : 4 boucles de longueurs différentes, une en prise.
 		auto post = [&engine](CommandType type, int track) { engine.post({ type, track, 0.0 }); };
@@ -158,7 +160,46 @@ int main(int argc, char* argv[])
 		run(engine, sample, bar + 20000);
 	}
 
-	BoohcleurEditor editor(processor);
+	// Aller-retour par le disque : enregistrer, puis rouvrir ailleurs.
+	std::unique_ptr<BoohcleurProcessor> reopened;
+
+	if (scenario == "session")
+	{
+		const auto wait = [](SessionManager& sessions, auto start)
+		{
+			bool finished = false;
+			SessionManager::Outcome outcome;
+			start([&](const SessionManager::Outcome& o) { outcome = o; finished = true; });
+
+			while (!finished)
+				juce::MessageManager::getInstance()->runDispatchLoopUntil(20);
+
+			std::printf("%s : %s\n", outcome.ok ? "ok" : "ÉCHEC", outcome.message.toRawUTF8());
+			juce::ignoreUnused(sessions);
+			return outcome.ok;
+		};
+
+		const auto folder = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("Capture BOOHcleur");
+
+		if (!wait(processor.sessions(), [&](auto done) { processor.sessions().save(folder, done); }))
+			return 1;
+
+		reopened = std::make_unique<BoohcleurProcessor>();
+		reopened->setRateAndBufferSizeDetails(sampleRate, blockSize);
+		reopened->prepareToPlay(sampleRate, blockSize);
+		auto& sessions = reopened->sessions();
+
+		if (!wait(sessions, [&](auto done) { sessions.open(folder.withFileExtension("boohcleur"), done); }))
+			return 1;
+
+		// Transport relancé : les boucles repartent ensemble.
+		std::int64_t other = 0;
+		reopened->engine().post({ CommandType::TransportStart, 0, 0.0 });
+		run(reopened->engine(), other, bar * 2 + 30000);
+		folder.withFileExtension("boohcleur").deleteRecursively();
+	}
+
+	BoohcleurEditor editor(reopened != nullptr ? *reopened : processor);
 	editor.setMidiPanelVisible(scenario == "midi");
 	editor.refresh();
 

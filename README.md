@@ -6,7 +6,7 @@ Looper guitare multipiste avec **Smart Quantize** : il corrige le placement des 
 
 ## Où on en est
 
-J4 : six boucles jouables dans une application Standalone (Mac et Windows), à la main ou au pied : enregistrement quantifié à la mesure, longueurs libres par boucle, overdubs en couches, undo/redo, mixeur (volume et mute par boucle, volume général), métronome, latence réglable à la main, pédalier MIDI (apprentissage, appui court, long et double, boucle sélectionnée ou dédiée). L'architecture est dans [`docs/adr/0001-architecture.md`](docs/adr/0001-architecture.md). Prochain jalon : J5, sauvegarde et chargement des sessions.
+J5 : six boucles jouables dans une application Standalone (Mac et Windows), à la main ou au pied : enregistrement quantifié à la mesure, longueurs libres par boucle, overdubs en couches, undo/redo, mixeur (volume et mute par boucle, volume général), métronome, latence réglable à la main, pédalier MIDI (apprentissage, appui court, long et double, boucle sélectionnée ou dédiée), sessions enregistrées et rouvertes avec leur audio, sauvegarde automatique. L'architecture est dans [`docs/adr/0001-architecture.md`](docs/adr/0001-architecture.md). Prochain jalon : J5b, éditeur de canevas.
 
 | Document | Contenu |
 | --- | --- |
@@ -41,6 +41,17 @@ Bouton **MIDI** en haut : une ligne par action (principal, stop, play, undo, red
 
 <p align="center"><img src="docs/images/interface-j3-midi.png" alt="Panneau MIDI" width="640"></p>
 
+### Sessions
+
+Bouton **Session** en haut : **Nouvelle session**, **Ouvrir…**, **Enregistrer** (Cmd+S, ou Ctrl+S), **Enregistrer sous…** (Cmd+Maj+S). Le nom de la session s'affiche à côté du logo, suivi d'un point quand il y a des changements non enregistrés.
+
+- Une session est un dossier `Nom.boohcleur` (dans `Documents/BOOHcleur` par défaut) qui contient tout : chaque couche en WAV 32 bits flottants (lisible dans n'importe quel éditeur audio), le tempo, le mixeur, les réglages et le pédalier. On peut le déplacer, le renommer ou le copier sur une clé.
+- On peut enregistrer en jouant : le son ne s'arrête pas. Une prise ou un overdub en cours n'est pas compris (il le sera à l'enregistrement suivant).
+- À l'ouverture, les boucles reviennent avec leurs couches (undo et redo compris), transport arrêté : **Démarrer** les relance ensemble à la mesure 1. La latence et l'entrée de la carte son restent celles du moment.
+- Un fichier abîmé ou manquant est signalé par son nom. Si l'ordinateur s'éteint pendant un enregistrement, la version précédente reste lisible.
+- Sauvegarde automatique toutes les 30 s : après un plantage, ou si on quitte sans enregistrer, l'application propose de récupérer les boucles au lancement suivant.
+- Limite : la carte son doit tourner à la même fréquence (44,1 ou 48 kHz) qu'à l'enregistrement de la session.
+
 ## Compiler et tester
 
 Il faut CMake 3.22 ou plus récent et un compilateur C++20 (GCC 11+, Clang 14+, MSVC 2022).
@@ -51,7 +62,7 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
-Les tests utilisent Catch2, téléchargé automatiquement par CMake au premier configure.
+Les tests utilisent Catch2 et les sessions nlohmann/json, téléchargés automatiquement par CMake au premier configure.
 
 Application (télécharge JUCE 8 au premier configure) :
 
@@ -62,14 +73,15 @@ cmake --build build -j
 
 Sur Mac, ajouter `-DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"` pour un binaire universel. Sous Linux, JUCE demande `libasound2-dev libfreetype-dev libfontconfig1-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxext-dev`.
 
-Capture de l'interface sans carte son (développement) : option `-DBOOHCLEUR_BUILD_SCREENSHOT=ON`, puis `boohcleur-screenshot sortie.png overdub` (scénarios : `loops`, `overdub`, `armed`, `recording`, `empty`, `midi`).
+Capture de l'interface sans carte son (développement) : option `-DBOOHCLEUR_BUILD_SCREENSHOT=ON`, puis `boohcleur-screenshot sortie.png overdub` (scénarios : `loops`, `overdub`, `armed`, `recording`, `empty`, `midi`, `session`, ce dernier enregistrant puis rouvrant les boucles par le même chemin que l'application).
 
 ## Organisation
 
 - `core/` : `boohcleur-core`, le moteur commun. C++20 et bibliothèque standard uniquement, sans JUCE ni dépendance à l'OS.
 - `app/` : enveloppe JUCE (Standalone ; VST3 et AU en J6) et interface.
+- `session/` : `boohcleur-session`, lecture et écriture des sessions (C++20 et nlohmann/json, sans JUCE).
 - `tests/` : tests automatisés, dont un banc hors ligne qui fait tourner le moteur bloc par bloc.
-- Les autres modules (analyse, rendu, contrôle, sessions, enveloppes JUCE, adaptateur stompbox) seront créés à leur jalon, voir l'ADR 0001.
+- Les autres modules (analyse, rendu, contrôle, enveloppes JUCE, adaptateur stompbox) seront créés à leur jalon, voir l'ADR 0001.
 
 ## Licence
 

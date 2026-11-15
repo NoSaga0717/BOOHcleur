@@ -97,6 +97,62 @@ namespace boohcleur
 		double secondsLeft = 0.0;		// son stéréo encore enregistrable
 	};
 
+	// --- Sessions (J5) ---
+
+	// Contenu d'une couche figé pour une sauvegarde : ses blocs dans la réserve.
+	struct LayerContent
+	{
+		SamplePos startOffset = 0;
+		SamplePos count = 0;
+		std::vector<int> chunks;	// taille fixe (réservée par prepare), -1 = silence
+	};
+
+	struct TrackContent
+	{
+		int numLayers = 0;			// couches sauvegardées (0 : boucle vide)
+		int numActive = 0;			// les suivantes sont annulées (redo possible)
+		bool playing = false;
+		LoopSpan span;
+		SamplePos loopLength = 0;
+		std::vector<LayerContent> layers;
+	};
+
+	struct ContentSnapshot
+	{
+		double sampleRate = 48000.0;
+		double bpm = 120.0;
+		TimeSignature signature {};
+		int numChannels = 2;
+		std::vector<TrackContent> tracks;
+	};
+
+	// Boucles relues d'une session, à recopier dans le moteur.
+	struct RestoreTrack
+	{
+		bool playing = false;
+		LoopSpan span;
+		SamplePos loopLength = 0;
+		int numActive = 0;
+		std::vector<LoopTrack::RestoredLayer> layers;	// vide : boucle vide
+	};
+
+	struct RestoreRequest
+	{
+		double bpm = 120.0;
+		TimeSignature signature {};
+		std::vector<RestoreTrack> tracks;
+	};
+
+	enum class RestoreResult : std::uint8_t
+	{
+		Ok,
+		NotPrepared,
+		InvalidTempo,
+		TooManyTracks,
+		InvalidLoop,		// longueur incohérente avec le tempo, ou trop longue
+		OutOfMemory
+	};
+
 	struct TransportSnapshot
 	{
 		bool playing = false;
@@ -177,6 +233,34 @@ namespace boohcleur
 		void setMonitorEnabled(bool enabled) noexcept { monitor_.store(enabled); }
 		bool monitorEnabled() const noexcept { return monitor_.load(); }
 
+		// --- Sessions ---
+		//
+		// Sauvegarde sans couper le son : beginSnapshot() demande au thread audio
+		// de figer, au début de son prochain bloc, la liste des couches terminées
+		// et d'épingler la réserve (les blocs rendus pendant ce temps ne sont pas
+		// réutilisés). snapshot() rend alors le contenu figé, dont un autre thread
+		// lit l'audio par readSnapshot() ; endSnapshot() libère la réserve. Une
+		// couche encore en cours d'écriture (première prise, overdub) est exclue.
+		// Un seul thread de contrôle à la fois pour tout ce bloc.
+
+		// false si une sauvegarde est déjà en cours.
+		bool beginSnapshot() noexcept;
+		// nullptr tant que le thread audio n'a pas figé le contenu.
+		const ContentSnapshot* snapshot() const noexcept;
+		// Moteur suspendu (audio arrêté) : fige tout de suite. false sans beginSnapshot().
+		bool captureSnapshotNow() noexcept;
+		void readSnapshot(int track, int layer, int channel, SamplePos start, int count, float* dest) const noexcept;
+		void endSnapshot() noexcept;
+
+		// Chargement : suspend() attend la fin du bloc audio en cours ; ensuite
+		// le thread audio sort du silence sans toucher au moteur, jusqu'à resume().
+		// restore() n'est permis qu'entre les deux. Transport arrêté après un
+		// chargement : les boucles lues repartent ensemble au démarrage.
+		void suspend() noexcept;
+		void resume() noexcept;
+		bool isSuspended() const noexcept { return suspendRequested_.load(); }
+		RestoreResult restore(const RestoreRequest& request) noexcept;
+
 	private:
 		struct Pending
 		{
@@ -215,6 +299,9 @@ namespace boohcleur
 		void renderTracks(SamplePos at, int numFrames, float* const* out, int numOut) noexcept;
 		void renderMetronome(SamplePos blockStart, int numFrames, float* const* out, int numOut) noexcept;
 		void publish(SamplePos blockStart) noexcept;
+		void processBlock(const float* const* in, int numIn, float* const* out, int numOut, int numFrames,
+			const MidiEvent* midi, int numMidi) noexcept;
+		void captureContent() noexcept;
 
 		EngineConfig config_;
 		TempoMap tempoMap_;
@@ -253,6 +340,12 @@ namespace boohcleur
 		std::atomic<int> selected_ { 0 };
 		std::atomic<float> master_ { 1.0f };
 		std::atomic<int> usedChunks_ { 0 };
+
+		enum SnapshotState : int { snapshotIdle, snapshotRequested, snapshotReady, snapshotReleasing };
+		ContentSnapshot content_;					// réservé par prepare()
+		std::atomic<int> snapshotState_ { snapshotIdle };
+		std::atomic<bool> suspendRequested_ { false };
+		std::atomic<bool> inProcess_ { false };
 
 		std::atomic<bool> transportPlaying_ { false };
 		std::atomic<std::int64_t> transportTick_ { 0 };

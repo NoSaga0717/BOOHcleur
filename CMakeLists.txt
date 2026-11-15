@@ -28,6 +28,9 @@ endif()
 # Aucune dépendance à JUCE ni à l'OS dans ce module.
 add_subdirectory(core)
 
+# Sessions sur disque (J5) : hors temps réel, sans JUCE non plus.
+add_subdirectory(session)
+
 if (BOOHCLEUR_BUILD_APP)
 	add_subdirectory(app)
 endif()

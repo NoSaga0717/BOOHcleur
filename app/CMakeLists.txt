@@ -32,6 +32,7 @@ target_sources(BOOHcleur PRIVATE
 	Source/LoopRing.cpp
 	Source/MidiPanel.cpp
 	Source/LoopTile.cpp
+	Source/SessionManager.cpp
 )
 
 target_compile_definitions(BOOHcleur PUBLIC
@@ -43,6 +44,7 @@ target_compile_definitions(BOOHcleur PUBLIC
 target_link_libraries(BOOHcleur
 	PRIVATE
 		boohcleur::core
+		boohcleur::session
 		boohcleur-warnings
 		BOOHcleurAssets
 		juce::juce_audio_utils
@@ -65,15 +67,18 @@ if (BOOHCLEUR_BUILD_SCREENSHOT)
 		Source/LoopRing.cpp
 		Source/MidiPanel.cpp
 		Source/LoopTile.cpp
+		Source/SessionManager.cpp
 	)
 
 	target_compile_definitions(boohcleur-screenshot PRIVATE
 		JUCE_WEB_BROWSER=0
 		JUCE_USE_CURL=0
+		JUCE_MODAL_LOOPS_PERMITTED=1	# boucle de messages pilotée à la main (scénario session)
 	)
 
 	target_link_libraries(boohcleur-screenshot PRIVATE
 		boohcleur::core
+		boohcleur::session
 		BOOHcleurAssets
 		juce::juce_audio_processors
 		juce::juce_audio_utils
