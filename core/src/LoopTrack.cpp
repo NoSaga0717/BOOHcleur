@@ -1,6 +1,7 @@
 #include "boohcleur/core/LoopTrack.h"
 
 #include <algorithm>
+#include <cmath>
 
 namespace boohcleur
 {
@@ -33,6 +34,15 @@ namespace boohcleur
 		for (auto& layer : layers_)
 			layer.chunks.assign(numChunks, -1);
 
+		peakBins_ = static_cast<std::size_t>(capacity / peakHop + 1);
+		const auto numPeaks = peakBins_ * static_cast<std::size_t>(config_.maxLayers);
+		peaks_ = std::make_unique<std::atomic<float>[]>(numPeaks);
+
+		for (std::size_t i = 0; i < numPeaks; ++i)
+			peaks_[i].store(0.0f, std::memory_order_relaxed);
+
+		published_ = std::make_unique<PublishedLayer[]>(static_cast<std::size_t>(config_.maxLayers));
+
 		preRoll_.assign(static_cast<std::size_t>(config_.numChannels),
 			std::vector<float>(static_cast<std::size_t>(config_.fadeSamples), 0.0f));
 
@@ -58,6 +68,16 @@ namespace boohcleur
 
 	void LoopTrack::releaseLayer(Layer& layer) noexcept
 	{
+		// Aperçu : la couche repart à vide.
+		if (peaks_ != nullptr)
+		{
+			const auto index = static_cast<std::size_t>(&layer - layers_.data());
+			const auto used = std::min(peakBins_, static_cast<std::size_t>(layer.count / peakHop + 1));
+
+			for (std::size_t b = 0; b < used; ++b)
+				peaks_[index * peakBins_ + b].store(0.0f, std::memory_order_relaxed);
+		}
+
 		for (auto& chunk : layer.chunks)
 		{
 			if (chunk >= 0 && pool_ != nullptr)
@@ -80,6 +100,48 @@ namespace boohcleur
 			layer.chunks[slot] = pool_->acquire();
 
 		return layer.chunks[slot] >= 0;
+	}
+
+	void LoopTrack::notePeak(int layer, SamplePos index, float value) noexcept
+	{
+		const auto bin = static_cast<std::size_t>(index / peakHop);
+
+		if (bin >= peakBins_)
+			return;
+
+		auto& slot = peaks_[static_cast<std::size_t>(layer) * peakBins_ + bin];
+		value = std::abs(value);
+
+		if (value > slot.load(std::memory_order_relaxed))
+			slot.store(value, std::memory_order_relaxed);
+	}
+
+	void LoopTrack::publishLayers() noexcept
+	{
+		for (std::size_t l = 0; l < layers_.size(); ++l)
+		{
+			published_[l].start.store(layers_[l].startOffset, std::memory_order_relaxed);
+			published_[l].count.store(static_cast<int>(l) < numLayers_ || isCapturing() ? layers_[l].count : 0,
+				std::memory_order_relaxed);
+		}
+	}
+
+	SamplePos LoopTrack::publishedStart(int layer) const noexcept
+	{
+		return layer >= 0 && layer < config_.maxLayers ? published_[static_cast<std::size_t>(layer)].start.load(std::memory_order_relaxed) : 0;
+	}
+
+	SamplePos LoopTrack::publishedCount(int layer) const noexcept
+	{
+		return layer >= 0 && layer < config_.maxLayers ? published_[static_cast<std::size_t>(layer)].count.load(std::memory_order_relaxed) : 0;
+	}
+
+	float LoopTrack::peak(int layer, std::size_t bin) const noexcept
+	{
+		if (layer < 0 || layer >= config_.maxLayers || bin >= peakBins_)
+			return 0.0f;
+
+		return peaks_[static_cast<std::size_t>(layer) * peakBins_ + bin].load(std::memory_order_relaxed);
 	}
 
 	float LoopTrack::read(const Layer& layer, int c, SamplePos index) const noexcept
@@ -396,6 +458,8 @@ namespace boohcleur
 			else if (capture.kind == CaptureKind::Overdub)
 				captureOverdub(capture, tempoMap, ring);
 		}
+
+		publishLayers();
 	}
 
 	void LoopTrack::captureFirst(Capture& capture, const InputRingBuffer& ring) noexcept
@@ -417,8 +481,14 @@ namespace boohcleur
 			const bool available = device >= ring.oldestAvailable();
 
 			if (ensure(layer, index))
+			{
 				for (int c = 0; c < config_.numChannels; ++c)
-					sample(layer, c, index) = available ? ring.sample(std::min(c, ring.numChannels() - 1), device) : 0.0f;
+				{
+					const float value = available ? ring.sample(std::min(c, ring.numChannels() - 1), device) : 0.0f;
+					sample(layer, c, index) = value;
+					notePeak(0, index, value);
+				}
+			}
 
 			++capture.next;
 			layer.count = capture.next - capture.start;
@@ -507,8 +577,14 @@ namespace boohcleur
 			const SamplePos index = layer->count;
 
 			if (ensure(*layer, index))
+			{
 				for (int c = 0; c < config_.numChannels; ++c)
-					sample(*layer, c, index) = available ? ring.sample(std::min(c, ring.numChannels() - 1), device) * gain : 0.0f;
+				{
+					const float value = available ? ring.sample(std::min(c, ring.numChannels() - 1), device) * gain : 0.0f;
+					sample(*layer, c, index) = value;
+					notePeak(capture.layer, index, value);
+				}
+			}
 
 			++layer->count;
 			++capture.next;

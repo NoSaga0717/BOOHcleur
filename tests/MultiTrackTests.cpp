@@ -300,3 +300,38 @@ TEST_CASE("Boucle libre : quantification immediate, longueur au temps pres")
 	CHECK(rig.out(5000 + length) == 1.0f);
 	CHECK(rig.out(5000 + 3 * length) == 1.0f);
 }
+
+TEST_CASE("Forme d'onde : apercu replie sur la boucle, couches annulees exclues")
+{
+	Rig rig;
+	rig.input = [](std::int64_t i)
+	{
+		if (i < bar && i >= 24000 && i < 26000) return 0.5f;		// premier quart : son à 1/4 de la boucle
+		if (i >= 2 * bar + 72000 && i < 2 * bar + 74000) return 0.25f;	// overdub aux 3/4
+		return 0.0f;
+	};
+
+	std::vector<float> shape(256);
+
+	rig.at(0, CommandType::TrackMain, 0);
+	rig.run(bar / 2);
+	REQUIRE(rig.engine.waveform(0, shape.data(), 256) > 0);	// pendant la prise
+	rig.at(bar, CommandType::TrackMain, 0);
+	rig.at(2 * bar, CommandType::TrackMain, 0);
+	rig.at(3 * bar, CommandType::TrackMain, 0);
+	rig.run(4 * bar);
+
+	const int n = rig.engine.waveform(0, shape.data(), 256);
+	REQUIRE(n == 187);	// une mesure de 96 000 échantillons en tranches de 512
+
+	auto at = [&](double fraction) { return shape[static_cast<std::size_t>(fraction * n)]; };
+	CHECK(at(0.255) == 0.5f);
+	CHECK(at(0.755) == 0.25f);
+	CHECK(at(0.5) == 0.0f);
+
+	rig.at(4 * bar, CommandType::TrackUndo, 0);
+	rig.run(4 * bar + blockSize * 2);
+	rig.engine.waveform(0, shape.data(), 256);
+	CHECK(at(0.755) == 0.0f);
+	CHECK(at(0.255) == 0.5f);
+}

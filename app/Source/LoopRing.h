@@ -2,6 +2,7 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include <array>
 #include <functional>
 
 #include "boohcleur/core/Engine.h"
@@ -46,6 +47,14 @@ namespace boohcleur::ui
 			double sampleRate = 48000.0;
 			bool blink = false;
 			bool compact = false;	// petit anneau de la grille de boucles
+
+			// Forme d'onde repliée sur un tour (Engine::waveform), 0 si aucune.
+			static constexpr int maxWaveformBins = 512;
+			std::array<float, maxWaveformBins> waveform {};
+			int waveformBins = 0;
+
+			// Remplit track et la forme d'onde depuis le moteur.
+			void read(const Engine& engine, int track);
 		};
 
 		void setModel(const Model& model);

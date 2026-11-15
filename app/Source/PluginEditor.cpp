@@ -360,7 +360,7 @@ void BoohcleurEditor::refresh()
 
 	for (int t = 0; t < numTiles; ++t)
 	{
-		model.track = engine.trackSnapshot(t);
+		model.read(engine, t);
 		tiles_[static_cast<std::size_t>(t)]->setModel(model, t == selected, engine.trackVolume(t), engine.trackMuted(t));
 	}
 

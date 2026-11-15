@@ -591,6 +591,64 @@ namespace boohcleur
 		return track >= 0 && track < maxTrackCount && mixer_[static_cast<std::size_t>(track)].muted.load();
 	}
 
+	int Engine::waveform(int track, float* out, int maxBins) const noexcept
+	{
+		if (track < 0 || track >= numTracks() || shared_ == nullptr || maxBins < 1)
+			return 0;
+
+		const auto snapshot = trackSnapshot(track);
+		const auto& loop = tracks_[static_cast<std::size_t>(track)];
+		constexpr SamplePos hop = LoopTrack::peakHop;
+
+		// Longueur d'un tour : la boucle, ou une mesure pendant la première prise.
+		SamplePos turn = snapshot.loopLength;
+		const bool firstTake = turn <= 0;
+
+		if (firstTake)
+		{
+			const double bpm = bpm_.load(std::memory_order_relaxed);
+			turn = static_cast<SamplePos>(config_.sampleRate * 60.0 / bpm * numerator_.load(std::memory_order_relaxed)
+				* 4.0 / denominator_.load(std::memory_order_relaxed));
+
+			if (snapshot.state != TrackState::Recording || turn <= 0)
+				return 0;
+		}
+
+		constexpr int maxPreviewBins = 1024;
+		const int bins = static_cast<int>(std::clamp<SamplePos>(turn / hop, 1, std::min(maxBins, maxPreviewBins)));
+		std::fill(out, out + bins, 0.0f);
+
+		// Crête par tranche dans une couche, somme des couches (elles s'empilent).
+		float layerPeak[maxPreviewBins];
+
+		const int layers = firstTake ? 1 : snapshot.numActiveLayers;
+
+		for (int l = 0; l < layers; ++l)
+		{
+			const SamplePos start = firstTake ? 0 : loop.publishedStart(l);
+			const SamplePos count = loop.publishedCount(l);
+
+			// Première prise : seul le dernier tour est montré.
+			const SamplePos from = firstTake ? std::max<SamplePos>(0, count - turn) : 0;
+			std::fill(layerPeak, layerPeak + bins, 0.0f);
+
+			for (SamplePos index = from - from % hop; index < count; index += hop)
+			{
+				const SamplePos position = (start + index) % turn;
+				auto& slot = layerPeak[position * bins / turn];
+				slot = std::max(slot, loop.peak(l, static_cast<std::size_t>(index / hop)));
+			}
+
+			for (int b = 0; b < bins; ++b)
+				out[b] += layerPeak[b];
+		}
+
+		for (int b = 0; b < bins; ++b)
+			out[b] = std::min(out[b], 1.0f);
+
+		return bins;
+	}
+
 	MemorySnapshot Engine::memorySnapshot() const noexcept
 	{
 		MemorySnapshot snapshot;

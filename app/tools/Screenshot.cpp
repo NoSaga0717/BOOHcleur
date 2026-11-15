@@ -23,8 +23,18 @@ namespace
 
 		for (; sample < until; sample += blockSize)
 		{
+			// Guitare simulée : une note pincée par croche, d'intensité variable,
+			// qui décroît (pour que la forme d'onde ait du relief).
 			for (int i = 0; i < blockSize; ++i)
-				inL[i] = inR[i] = 0.2f * static_cast<float>(std::sin(0.05 * static_cast<double>(sample + i)));
+			{
+				const std::int64_t n = sample + i;
+				const std::int64_t eighth = 12000;
+				const std::int64_t note = n / eighth;
+				const double t = static_cast<double>(n % eighth) / sampleRate;
+				const double accent = 0.25 + 0.6 * std::abs(std::sin(static_cast<double>(note) * 1.7));
+				const double pitch = 110.0 * (1.0 + static_cast<double>(note % 5) * 0.25);
+				inL[i] = inR[i] = static_cast<float>(accent * std::exp(-t * 9.0) * std::sin(2.0 * 3.14159265 * pitch * t));
+			}
 
 			const float* in[2] = { inL.data(), inR.data() };
 			float* out[2] = { outL.data(), outR.data() };
